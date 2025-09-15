@@ -16,12 +16,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Preview
 @Composable
-fun LoginScreen() {
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+fun LoginScreen(loginViewModel: LoginViewModel = viewModel()) {
+    val uiState by loginViewModel.uIState.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -70,8 +71,8 @@ fun LoginScreen() {
                 Spacer(Modifier.height(32.dp))
                 // Email
                 OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
+                    value = uiState.email,
+                    onValueChange = { loginViewModel.onEmailChange(it) },
                     placeholder = { Text("Usuario") },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -82,8 +83,8 @@ fun LoginScreen() {
                 Spacer(Modifier.height(16.dp))
                 // Password
                 OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
+                    value = uiState.password,
+                    onValueChange = { loginViewModel.onPasswordChange(it) },
                     placeholder = { Text("Contraseña") },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -96,6 +97,7 @@ fun LoginScreen() {
                 Button(
                     onClick = { /* Acción */ },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEC221F)),
+                    enabled = uiState.isLoginEnabled,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp)
