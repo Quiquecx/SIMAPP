@@ -7,4 +7,3 @@ object Login
 
 @Serializable
 object Register
-

@@ -6,14 +6,20 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.quiquecx.simaapp.view.auth.login.LoginScreen
-import com.quiquecx.simaapp.view.core.navigation.Login
+import com.quiquecx.simaapp.view.auth.register.RegisterScreen
 
 @Composable
 fun NavigationWrapper() {
     val navController: NavHostController = rememberNavController()
+
     NavHost(navController = navController, startDestination = Login) {
         composable<Login> {
-            LoginScreen()
+            LoginScreen(
+                navigateToRegister = { navController.navigate(Register) }
+            )
+        }
+        composable<Register> {
+            RegisterScreen(navigateBack = { navController.popBackStack() })
         }
     }
 }
