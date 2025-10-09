@@ -11,6 +11,10 @@ composeBom = "2025.08.01"
 navigationCompose = "2.9.3"
 kotlinSerialization = "1.9.0"
 benchmarkCommon = "1.4.1"
+firebaseBom = "33.1.1"
+service = "4.4.2"
+crashlytics = "3.0.2"
+
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -32,8 +36,13 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 kotlin-serialization-json = { module ="org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinSerialization"}
 androidx-benchmark-common = { group = "androidx.benchmark", name = "benchmark-common", version.ref = "benchmarkCommon" }
 
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-crashlytics = {module = "com.google.firebase:firebase-crashlytics-ktx"}
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+google-services = { id = "com.google.gms.google-services", version.ref = "service" }
+crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "crashlytics" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 jetbrainsKotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

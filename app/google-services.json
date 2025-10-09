@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "434709655751",
+    "project_id": "simaapp-c2b77",
+    "storage_bucket": "simaapp-c2b77.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:434709655751:android:6dff0b0a111c49f3048ee2",
+        "android_client_info": {
+          "package_name": "com.quiquecx.simaapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCoFM4kIQhdtWGv7f8ulIUWlfnDBa8suHc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
