@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.jetbrainsKotlinSerialization)
     alias(libs.plugins.google.services)
     alias(libs.plugins.crashlytics)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt)
 }
 
 android {
@@ -62,6 +64,11 @@ dependencies {
     //navigation
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.benchmark.common)
+
+    //DI
+    implementation(libs.hilt.android)
+    implementation(libs.hilt.navigation)
+    ksp(libs.hilt.compiler)
 
     //testing
     testImplementation(libs.junit)

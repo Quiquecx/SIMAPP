@@ -2,11 +2,15 @@ package com.quiquecx.simaapp.view.auth.login
 
 import android.util.Patterns
 import androidx.lifecycle.ViewModel
+import com.quiquecx.simaapp.domain.useCase.LoginUseCase
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import javax.inject.Inject
 
-class LoginViewModel : ViewModel() {
+@HiltViewModel
+class LoginViewModel @Inject constructor(val login: LoginUseCase) : ViewModel() {
     private val _uiState = MutableStateFlow(LoginUiState())
     val uIState: StateFlow<LoginUiState> = _uiState
 
