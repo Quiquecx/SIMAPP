@@ -57,9 +57,15 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.kotlin.serialization.json)
 
+    // Coroutines
+    implementation(libs.coroutines.core)
+    implementation(libs.coroutines.android)
+    testImplementation(libs.coroutines.test)
+
     //firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.crashlytics)
+    implementation(libs.firebase.auth)
 
     //navigation
     implementation(libs.androidx.navigation.compose)
