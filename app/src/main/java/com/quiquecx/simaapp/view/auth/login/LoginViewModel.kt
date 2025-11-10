@@ -36,16 +36,14 @@ class LoginViewModel @Inject constructor(
         val email = _uiState.value.email
         val password = _uiState.value.password
 
-        // Validación rápida antes de lanzar corrutina
         if (!isEmailValid(email) || !isPasswordValid(password)) return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
 
             try {
                 val user = loginUseCase(email, password)
 
-                // Éxito → puedes guardar el usuario, navegar, etc.
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -53,8 +51,11 @@ class LoginViewModel @Inject constructor(
                     )
                 }
 
+                // ✅ Limpia el mensaje después de un corto retraso
+                kotlinx.coroutines.delay(100)
+                _uiState.update { it.copy(successMessage = null) }
+
             } catch (e: Exception) {
-                // Error → mostramos mensaje
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -64,6 +65,7 @@ class LoginViewModel @Inject constructor(
             }
         }
     }
+
 
     // Validaciones
     private fun verifyLogin() {

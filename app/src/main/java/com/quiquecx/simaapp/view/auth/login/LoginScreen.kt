@@ -24,7 +24,7 @@ import kotlinx.coroutines.launch
 fun LoginScreen(
     loginViewModel: LoginViewModel = hiltViewModel(),
     navigateToRegister: () -> Unit = {},
-    navigateToHome: () -> Unit = {}
+    navigateToCompanySelection: () -> Unit = {}
 ) {
     val uiState by loginViewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -40,7 +40,7 @@ fun LoginScreen(
         uiState.successMessage?.let {
             coroutineScope.launch {
                 snackbarHostState.showSnackbar(it)
-                navigateToHome() // 🔹 Aquí podrías navegar a otra pantalla
+                navigateToCompanySelection() // 🔹 Aquí podrías navegar a otra pantalla
             }
         }
     }

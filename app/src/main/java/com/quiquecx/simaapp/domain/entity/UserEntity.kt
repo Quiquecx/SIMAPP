@@ -5,13 +5,12 @@ data class UserEntity (
     val email: String = "",
     val role: String = "",
     val name: String = "",
-    val company: List<String>,
+    val company: List<String> = emptyList(),
     val userMode: UserMode
-
 )
 
 sealed class UserMode(val userType: Int){
-    data object GENERAL_MANAGER : UserMode(0)
-    data object SUPERVISOR : UserMode(1)
-    data object OPERADOR : UserMode(2)
+    object GENERAL_MANAGER : UserMode(0)
+    object SUPERVISOR : UserMode(1)
+    object OPERADOR : UserMode(2)
 }

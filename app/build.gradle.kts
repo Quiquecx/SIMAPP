@@ -57,15 +57,23 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.kotlin.serialization.json)
 
+    //datastore
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
+
     // Coroutines
     implementation(libs.coroutines.core)
     implementation(libs.coroutines.android)
+    implementation(libs.androidx.datastore.core)
     testImplementation(libs.coroutines.test)
 
     //firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+
 
     //navigation
     implementation(libs.androidx.navigation.compose)
