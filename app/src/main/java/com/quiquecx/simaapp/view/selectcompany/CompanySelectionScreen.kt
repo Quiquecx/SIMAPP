@@ -17,38 +17,40 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.quiquecx.simaapp.domain.entity.CompanyEntity // 👈 IMPORTAR ESTO
 import com.quiquecx.simaapp.ui.theme.SimaAppTheme
 
 @Composable
 fun CompanySelectionScreen(
-    companiesFromLogin: List<String>,
+    // 🛑 Eliminamos 'companiesFromLogin' ya que el VM carga los datos
     onNavigateToHome: () -> Unit,
-    viewModel: CompanySelectionViewModel = hiltViewModel()
+    // ✅ Usamos el nombre del ViewModel que carga desde la BD
+    viewModel: SelectCompanyViewModel = hiltViewModel()
 ) {
+    // ✅ Usamos SelectCompanyUiState
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.setCompanies(companiesFromLogin)
-        // If auto-selected (single company), confirm automatically
-        uiState.selectedCompany?.let {
-            if (companiesFromLogin.size == 1) {
-                viewModel.confirmSelection(onNavigateToHome)
-            }
+    // 💡 Lógica de navegación: Navega cuando el VM indica que la selección está completa.
+    LaunchedEffect(uiState.selectionComplete) {
+        if (uiState.selectionComplete) {
+            onNavigateToHome()
         }
     }
 
     CompanySelectionContent(
         uiState = uiState,
-        onCompanySelected = { viewModel.onCompanySelected(it) },
-        onConfirm = { viewModel.confirmSelection(onNavigateToHome) }
+        // ✅ Ahora enviamos el objeto CompanyEntity completo a la función de selección
+        onCompanySelected = { viewModel.selectCompany(it) }
+        // 🛑 Eliminamos onConfirm, ya que la selección/navegación sucede al hacer clic en la tarjeta
     )
 }
 
 @Composable
 fun CompanySelectionContent(
-    uiState: CompanySelectionUiState,
-    onCompanySelected: (String) -> Unit,
-    onConfirm: () -> Unit
+    // ✅ Usamos SelectCompanyUiState
+    uiState: SelectCompanyUiState,
+    // ✅ La selección recibe el objeto CompanyEntity
+    onCompanySelected: (CompanyEntity) -> Unit
 ) {
     Scaffold { padding ->
         Column(
@@ -70,76 +72,99 @@ fun CompanySelectionContent(
             )
             Spacer(Modifier.height(24.dp))
 
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(uiState.companies) { company ->
-                    val isSelected = uiState.selectedCompany == company
-                    Card(
-                        modifier = Modifier
-                            .width(200.dp)
-                            .height(160.dp)
-                            .shadow(6.dp, RoundedCornerShape(12.dp))
-                            .clickable { onCompanySelected(company) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) Color(0xFFEC221F) else Color.White
+            // 🛑 Lógica de estado y error
+            if (uiState.isLoading) {
+                Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFFEC221F))
+                }
+            } else if (uiState.errorMessage != null) {
+                Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text("Error: ${uiState.errorMessage}", color = Color.Red)
+                }
+            } else {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // ✅ Iteramos sobre objetos CompanyEntity
+                    items(uiState.companies) { company ->
+                        // La selección se compara con el ID
+                        val isSelected = uiState.selectedCompany == company.id
+                        CompanyCard(
+                            company = company,
+                            isSelected = isSelected,
+                            onClick = { onCompanySelected(company) } // Enviamos el objeto
                         )
-                    ) {
-                        Box(
-                            Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Reemplazar Text por Image si tienes logo
-                            Text(
-                                text = company.uppercase(),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    color = if (isSelected) Color.White else Color.Black
-                                )
-                            )
-                        }
                     }
                 }
-            }
 
-            Spacer(Modifier.height(32.dp))
-
-            Button(
-                onClick = onConfirm,
-                enabled = uiState.selectedCompany != null && !uiState.isLoading,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEC221F)),
-                shape = RoundedCornerShape(24.dp)
-            ) {
-                if (uiState.isLoading) {
-                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
-                } else {
-                    Text("Continuar", color = Color.White)
+                // Si la selección ocurre al hacer clic en la tarjeta, el botón 'Continuar' no es necesario.
+                // Si lo quieres mantener, se activa si hay una compañía seleccionada.
+                Spacer(Modifier.height(32.dp))
+                uiState.errorMessage?.let { msg ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(text = msg, color = Color.Red)
                 }
-            }
-            uiState.errorMessage?.let { msg ->
-                Spacer(Modifier.height(8.dp))
-                Text(text = msg, color = Color.Red)
             }
         }
     }
 }
+
+// --------------------------------------------------------------------------
+// COMPONENTE AUXILIAR (Extraído para claridad y reuso)
+// --------------------------------------------------------------------------
+
+@Composable
+fun CompanyCard(company: CompanyEntity, isSelected: Boolean, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .width(200.dp)
+            .height(160.dp)
+            .shadow(6.dp, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) Color(0xFFEC221F) else Color.White
+        )
+    ) {
+        Box(
+            Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = company.name.uppercase(),
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    color = if (isSelected) Color.White else Color.Black,
+                    fontWeight = FontWeight.Bold
+                )
+            )
+        }
+    }
+}
+
+
+// --------------------------------------------------------------------------
+// PREVIEW
+// --------------------------------------------------------------------------
+
+private val mockCompanies = listOf(
+    // ✅ CORRECCIÓN: Agregar el parámetro 'responsible' (o el que falte)
+    CompanyEntity(id = "1", name = "BorgWarner", responsible = "Quique"),
+    CompanyEntity(id = "2", name = "HELLA", responsible = "Quique"),
+    CompanyEntity(id = "3", name = "CHENSON", responsible = "Quique")
+)
 
 @Preview(showBackground = true, showSystemUi = false)
 @Composable
 fun CompanySelectionPreview() {
     SimaAppTheme {
         CompanySelectionContent(
-            uiState = CompanySelectionUiState(
-                companies = listOf("BorgWarner", "HELLA", "CHENSON"),
-                selectedCompany = null,
-                isLoading = false
+            uiState = SelectCompanyUiState(
+                companies = mockCompanies,
+                isLoading = false,
+                selectedCompany = "2"
             ),
-            onCompanySelected = {},
-            onConfirm = {}
+            onCompanySelected = {}
         )
     }
 }

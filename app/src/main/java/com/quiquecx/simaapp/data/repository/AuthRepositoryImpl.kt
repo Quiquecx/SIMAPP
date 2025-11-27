@@ -1,6 +1,7 @@
 package com.quiquecx.simaapp.data.repository
 
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import com.quiquecx.simaapp.data.response.UserResponse
 import com.quiquecx.simaapp.data.response.toDomain
 import com.quiquecx.simaapp.domain.entity.UserEntity
@@ -9,7 +10,8 @@ import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 
 class AuthRepositoryImpl @Inject constructor(
-    private val firebaseAuth: FirebaseAuth
+    private val firebaseAuth: FirebaseAuth,
+    firestore: FirebaseFirestore
 ) : AuthRepository {
 
     override suspend fun doLogin(user: String, password: String): UserEntity {

@@ -1,10 +1,12 @@
 package com.quiquecx.simaapp.data.datastore
+
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.quiquecx.simaapp.domain.repository.SelectedCompanyRepository
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
 class SelectedCompanyDataStoreImpl @Inject constructor(
@@ -12,16 +14,26 @@ class SelectedCompanyDataStoreImpl @Inject constructor(
 ) : SelectedCompanyRepository {
 
     companion object {
-        private val SELECTED_COMPANY_KEY = stringPreferencesKey("selected_company_id")
+        // La clave utilizada para guardar el ID de la empresa.
+        val COMPANY_ID_KEY = stringPreferencesKey("selected_company_id")
     }
 
-    override suspend fun saveSelectedCompany(companyId: String) {
-        dataStore.edit { prefs ->
-            prefs[SELECTED_COMPANY_KEY] = companyId
+    /**
+     * Guarda el ID de la empresa seleccionada en DataStore.
+     */
+    override suspend fun saveSelectedCompanyId(id: String) {
+        dataStore.edit { preferences ->
+            preferences[COMPANY_ID_KEY] = id
         }
     }
 
-    override suspend fun getSelectedCompany(): String? {
-        return dataStore.data.first()[SELECTED_COMPANY_KEY]
+    /**
+     * Obtiene el ID de la empresa seleccionada de DataStore como un String.
+     */
+    override suspend fun getSelectedCompanyId(): String? {
+        return dataStore.data.map { preferences ->
+            preferences[COMPANY_ID_KEY]
+        }.first() // .first() obtiene el valor más reciente y termina la corrutina.
     }
+
 }
