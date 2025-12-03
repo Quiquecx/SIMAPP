@@ -22,32 +22,54 @@ import com.quiquecx.simaapp.domain.entity.ActivityEntity
 import java.text.SimpleDateFormat
 import java.util.Locale
 
+/**
+ * Pantalla principal que muestra los detalles de una actividad, permitiendo su edición,
+ * control de calidad, ajuste de progreso y eliminación.
+ *
+ * @param viewModel ViewModel inyectado que gestiona el estado de la actividad desde Firestore.
+ * @param onBack Función de navegación para regresar a la pantalla anterior (Dashboard).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActivityDetailsScreen(
     viewModel: ActivityDetailsViewModel = hiltViewModel(),
     onBack: () -> Unit
 ) {
+    // Escucha la actividad en tiempo real desde el ViewModel
     val activity by viewModel.activity.collectAsStateWithLifecycle()
+
+    // Estado local para controlar la visibilidad del diálogo de eliminación
     var showDeleteDialog by remember { mutableStateOf(false) }
 
-    // --- NUEVOS ESTADOS PARA CONTROL DE CALIDAD ---
+    // --- ESTADOS LOCALES PARA EDICIÓN DE CONTROL DE CALIDAD Y PROGRESO ---
     var currentProgress by remember { mutableStateOf(0f) }
     var currentOkCount by remember { mutableStateOf("") }
     var currentNoOkCount by remember { mutableStateOf("") }
     var currentHours by remember { mutableStateOf("") }
-    // ---------------------------------------------
+    // ---------------------------------------------------------------------
 
-    // Inicializa estados cuando la actividad se carga o actualiza
+    // --- ESTADOS LOCALES PARA EDICIÓN DE DETALLES Y ESTIMACIONES ---
+    var currentTotalCount by remember { mutableStateOf("") }
+    var currentEstimadoHoras by remember { mutableStateOf("") }
+    var currentEstimadoCosto by remember { mutableStateOf("") }
+    var currentDefecto by remember { mutableStateOf("") }
+    // -------------------------------------------------------------
+
+    // Efecto que se dispara cada vez que el objeto 'activity' cambia (actualizaciones de Firestore)
     LaunchedEffect(activity) {
         activity?.let {
+            // Inicialización de estados de Calidad y Progreso
             currentProgress = it.progreso.toFloat()
-            // Inicializamos los campos con los valores actuales (o 0 si son nulos/vacíos)
             currentOkCount = it.cantidadOk.toString()
             currentNoOkCount = it.cantidadNoOk.toString()
             currentHours = it.horasAcumuladas.toString()
-        }
 
+            // Inicialización de estados de Detalles y Estimaciones
+            currentTotalCount = it.cantidadTotal.toString()
+            currentEstimadoHoras = it.estimadoHoras
+            currentEstimadoCosto = it.estimadoCosto
+            currentDefecto = it.defecto
+        }
     }
 
     Scaffold(
@@ -70,6 +92,7 @@ fun ActivityDetailsScreen(
 
         when (val currentActivity = activity) {
             null -> {
+                // Muestra un cargador mientras se recupera la actividad de Firestore
                 Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
@@ -80,10 +103,29 @@ fun ActivityDetailsScreen(
                         .fillMaxSize()
                         .padding(padding)
                         .padding(horizontal = 24.dp)
-                        .verticalScroll(rememberScrollState()) // Añadimos scroll
+                        .verticalScroll(rememberScrollState()) // Habilita el desplazamiento vertical
                 ) {
-                    // --- 1. DETALLES DE LA ACTIVIDAD ---
-                    DetailsSection(currentActivity)
+                    // --- 1. DETALLES DE LA ACTIVIDAD (EDICIÓN DE ESTIMACIONES) ---
+                    EditableDetailsSection(
+                        currentActivity = currentActivity,
+                        currentDefecto = currentDefecto,
+                        onDefectoChange = { currentDefecto = it },
+                        currentTotalCount = currentTotalCount,
+                        onTotalCountChange = { currentTotalCount = it },
+                        currentEstimadoHoras = currentEstimadoHoras,
+                        onEstimadoHorasChange = { currentEstimadoHoras = it },
+                        currentEstimadoCosto = currentEstimadoCosto,
+                        onEstimadoCostoChange = { currentEstimadoCosto = it },
+                        onSave = {
+                            // Llama a la función de guardado para detalles y estimaciones
+                            viewModel.updateGeneralDetails(
+                                cantidadTotal = currentTotalCount.toIntOrNull() ?: currentActivity.cantidadTotal,
+                                estimadoHoras = currentEstimadoHoras,
+                                estimadoCosto = currentEstimadoCosto,
+                                defecto = currentDefecto
+                            )
+                        }
+                    )
 
                     Spacer(Modifier.height(32.dp))
 
@@ -97,7 +139,7 @@ fun ActivityDetailsScreen(
                         currentHours = currentHours,
                         onHoursChange = { currentHours = it },
                         onSave = {
-                            // Llamada a la nueva función de guardado en el ViewModel
+                            // Llama a la función de guardado para calidad, que recalcula el progreso
                             viewModel.updateActivityData(
                                 okCount = currentOkCount.toIntOrNull() ?: currentActivity.cantidadOk,
                                 noOkCount = currentNoOkCount.toIntOrNull() ?: currentActivity.cantidadNoOk,
@@ -108,7 +150,7 @@ fun ActivityDetailsScreen(
 
                     Spacer(Modifier.height(32.dp))
 
-                    // --- 3. CONTROL DE PROGRESO
+                    // --- 3. CONTROL DE PROGRESO (AJUSTE MANUAL CON SLIDER) ---
                     ProgressControlSection(
                         currentActivity = currentActivity,
                         currentProgress = currentProgress,
@@ -122,7 +164,7 @@ fun ActivityDetailsScreen(
         }
     }
 
-    // Diálogo de Confirmación de Eliminación (Existente)
+    // Diálogo de Confirmación de Eliminación
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
@@ -131,6 +173,7 @@ fun ActivityDetailsScreen(
             confirmButton = {
                 Button(
                     onClick = {
+                        // Elimina la actividad y navega de regreso si es exitoso
                         viewModel.deleteActivity(onSuccess = onBack)
                         showDeleteDialog = false
                     },
@@ -148,29 +191,101 @@ fun ActivityDetailsScreen(
     }
 }
 
-// --- Componentes Reutilizables ---
+// -----------------------------------------------------------------------------
+// COMPONENTES REUTILIZABLES (SECCIONES)
+// -----------------------------------------------------------------------------
 
+/**
+ * Sección de edición para Detalles y Estimaciones.
+ * Muestra campos de texto para Cantidad Total, Horas Estimadas, Costo Estimado y Defecto.
+ */
 @Composable
-fun DetailsSection(currentActivity: ActivityEntity) {
+fun EditableDetailsSection(
+    currentActivity: ActivityEntity,
+    currentDefecto: String,
+    onDefectoChange: (String) -> Unit,
+    currentTotalCount: String,
+    onTotalCountChange: (String) -> Unit,
+    currentEstimadoHoras: String,
+    onEstimadoHorasChange: (String) -> Unit,
+    currentEstimadoCosto: String,
+    onEstimadoCostoChange: (String) -> Unit,
+    onSave: () -> Unit
+) {
     val formatter = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
     val statusColor = if (currentActivity.estado == "Finalizado") Color.Green else Color.Red
 
-    Text("ID: ${currentActivity.id}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-    Text("Material: ${currentActivity.materialId} | Proveedor: ${currentActivity.proveedorId}", style = MaterialTheme.typography.bodyMedium)
-    Spacer(Modifier.height(16.dp))
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text("ID: ${currentActivity.id}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+        Text("Material: ${currentActivity.materialId} | Proveedor: ${currentActivity.proveedorId}", style = MaterialTheme.typography.bodyMedium)
+        Text("Responsable: ${currentActivity.responsable}", style = MaterialTheme.typography.bodyLarge)
+        Text("Fecha Inicio: ${formatter.format(currentActivity.fechaInicio)}", style = MaterialTheme.typography.bodyLarge)
+        Text("Estado: ${currentActivity.estado}", style = MaterialTheme.typography.bodyLarge.copy(color = statusColor))
 
-    Text("Defecto: ${currentActivity.defecto}", style = MaterialTheme.typography.bodyLarge)
-    Text("Responsable: ${currentActivity.responsable}", style = MaterialTheme.typography.bodyLarge)
-    Text("Fecha Inicio: ${formatter.format(currentActivity.fechaInicio)}", style = MaterialTheme.typography.bodyLarge)
-    Text("Estado: ${currentActivity.estado}", style = MaterialTheme.typography.bodyLarge.copy(color = statusColor))
+        Spacer(Modifier.height(16.dp))
+        Divider()
+        Spacer(Modifier.height(16.dp))
 
-    Spacer(Modifier.height(16.dp))
+        // --- CAMPOS EDITABLES ---
 
-    // Muestra datos de estimación y totales
-    Text("Estimado Horas: ${currentActivity.estimadoHoras} | Costo: ${currentActivity.estimadoCosto}", fontWeight = FontWeight.SemiBold)
-    Text("Cant. Total a Producir: ${currentActivity.cantidadTotal}", fontWeight = FontWeight.SemiBold)
+        // Defecto/Nota
+        OutlinedTextField(
+            value = currentDefecto,
+            onValueChange = onDefectoChange,
+            label = { Text("Defecto/Nota") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+
+        // Cantidad Total (Piezas)
+        OutlinedTextField(
+            value = currentTotalCount,
+            onValueChange = onTotalCountChange,
+            label = { Text("Cantidad Total (Piezas)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+
+        // Horas Estimadas
+        OutlinedTextField(
+            value = currentEstimadoHoras,
+            onValueChange = onEstimadoHorasChange,
+            label = { Text("Horas Estimadas") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+
+        // Costo Estimado
+        OutlinedTextField(
+            value = currentEstimadoCosto,
+            onValueChange = onEstimadoCostoChange,
+            label = { Text("Costo Estimado") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(16.dp))
+
+        // Botón de Guardar
+        Button(
+            onClick = onSave,
+            modifier = Modifier.fillMaxWidth(),
+            // Habilita el botón solo si al menos un campo ha sido modificado.
+            enabled = currentActivity.cantidadTotal.toString() != currentTotalCount ||
+                    currentActivity.estimadoHoras != currentEstimadoHoras ||
+                    currentActivity.estimadoCosto != currentEstimadoCosto ||
+                    currentActivity.defecto != currentDefecto
+        ) {
+            Text("Guardar Detalles y Estimaciones")
+        }
+    }
 }
 
+
+/**
+ * Sección para el ajuste manual del Progreso (%) mediante un Slider.
+ */
 @Composable
 fun ProgressControlSection(
     currentActivity: ActivityEntity,
@@ -185,20 +300,23 @@ fun ProgressControlSection(
         value = currentProgress,
         onValueChange = onProgressChange,
         valueRange = 0f..100f,
-        steps = 99,
+        steps = 99, // Permite valores enteros de 0 a 100
         modifier = Modifier.fillMaxWidth()
     )
 
     Button(
         onClick = onSave,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        // Habilita solo si el progreso ha cambiado respecto al valor de Firestore
+        // Habilita solo si el progreso local difiere del valor de Firestore
         enabled = currentActivity.progreso.toFloat().toInt() != currentProgress.toInt()
     ) {
         Text("Guardar Progreso (Slider)")
     }
 }
 
+/**
+ * Sección para la entrada de datos de control de calidad (Piezas OK/NO OK y Horas).
+ */
 @Composable
 fun QualityControlSection(
     currentActivity: ActivityEntity,
@@ -255,7 +373,7 @@ fun QualityControlSection(
             Button(
                 onClick = onSave,
                 modifier = Modifier.fillMaxWidth(),
-                // Se habilita si al menos un campo ha cambiado respecto a Firestore
+                // Se habilita si al menos un campo de calidad/horas ha sido modificado.
                 enabled = currentActivity.cantidadOk.toString() != currentOkCount ||
                         currentActivity.cantidadNoOk.toString() != currentNoOkCount ||
                         currentActivity.horasAcumuladas.toString() != currentHours
@@ -266,19 +384,26 @@ fun QualityControlSection(
     }
 }
 
+// -----------------------------------------------------------------------------
+// PREVIEW
+// -----------------------------------------------------------------------------
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PreviewActivityDetailsContent(activity: ActivityEntity) {
-    // Usamos el mismo diseño del Scaffold para simular la pantalla
+    // Definición del Scaffold para el Preview
     Scaffold(
         topBar = {
             TopAppBar(
-                // 🚨 CORRECCIÓN CLAVE: Usamos 'activity.tipo' directamente (sin '?')
-                // ya que la función PreviewActivityDetailsContent garantiza que 'activity' no es nulo.
                 title = { Text(activity.tipo) },
                 navigationIcon = {
                     IconButton(onClick = {}) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Atrás")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {}) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color(0xFFEC221F))
                     }
                 }
             )
@@ -291,15 +416,31 @@ fun PreviewActivityDetailsContent(activity: ActivityEntity) {
                 .padding(horizontal = 24.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Llamamos a los componentes internos con los datos simulados
-            DetailsSection(activity)
+            // --- ESTADOS LOCALES SIMULADOS PARA PREVIEW ---
+            var mockDefecto by remember { mutableStateOf(activity.defecto) }
+            var mockTotalCount by remember { mutableStateOf(activity.cantidadTotal.toString()) }
+            var mockEstimadoHoras by remember { mutableStateOf(activity.estimadoHoras) }
+            var mockEstimadoCosto by remember { mutableStateOf(activity.estimadoCosto) }
+
+            // 1. Detalles Editables
+            EditableDetailsSection(
+                currentActivity = activity,
+                currentDefecto = mockDefecto,
+                onDefectoChange = { mockDefecto = it },
+                currentTotalCount = mockTotalCount,
+                onTotalCountChange = { mockTotalCount = it },
+                currentEstimadoHoras = mockEstimadoHoras,
+                onEstimadoHorasChange = { mockEstimadoHoras = it },
+                currentEstimadoCosto = mockEstimadoCosto,
+                onEstimadoCostoChange = { mockEstimadoCosto = it },
+                onSave = { /* No hace nada en Preview */ }
+            )
             Spacer(Modifier.height(32.dp))
 
-            // Creamos estados locales simulados para los TextFields
+            // 2. Control de Calidad
             var mockOk by remember { mutableStateOf(activity.cantidadOk.toString()) }
             var mockNoOk by remember { mutableStateOf(activity.cantidadNoOk.toString()) }
             var mockHours by remember { mutableStateOf(activity.horasAcumuladas.toString()) }
-
             QualityControlSection(
                 currentActivity = activity,
                 currentOkCount = mockOk,
@@ -312,7 +453,7 @@ fun PreviewActivityDetailsContent(activity: ActivityEntity) {
             )
             Spacer(Modifier.height(32.dp))
 
-            // Estado de progreso simulado
+            // 3. Control de Progreso
             var mockProgress by remember { mutableStateOf(activity.progreso.toFloat()) }
             ProgressControlSection(
                 currentActivity = activity,
@@ -325,8 +466,9 @@ fun PreviewActivityDetailsContent(activity: ActivityEntity) {
     }
 }
 
-// FUNCIÓN PRINCIPAL DEL PREVIEW
-
+/**
+ * Función principal del Preview con datos simulados.
+ */
 @Preview(showBackground = true, name = "Detalles de Actividad Cargados")
 @Composable
 fun ActivityDetailsScreenPreview() {
@@ -343,7 +485,8 @@ fun ActivityDetailsScreenPreview() {
         estado = "En curso",
         progreso = 25,
         estimadoHoras = "48",
-        estimadoCosto = "5000"
+        estimadoCosto = "5000",
+        defecto = "Necesita inspección detallada de soldaduras"
     )
 
     MaterialTheme {

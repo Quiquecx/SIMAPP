@@ -16,27 +16,49 @@ import kotlinx.coroutines.launch
 import java.net.URLDecoder
 import javax.inject.Inject
 
+// Etiqueta para el logging profesional
 private const val TAG = "ActivityDetailsVM"
 
+/**
+ * ViewModel responsable de la lógica de la pantalla de detalles de la actividad.
+ *
+ * Se encarga de:
+ * 1. Recuperar el ID de la actividad de la navegación.
+ * 2. Escuchar la actividad en tiempo real desde Firestore (stream).
+ * 3. Implementar la lógica para actualizar el progreso y los datos de calidad.
+ * 4. Implementar la lógica para actualizar los detalles generales y estimaciones.
+ * 5. Implementar la lógica para eliminar la actividad.
+ */
 @HiltViewModel
 class ActivityDetailsViewModel @Inject constructor(
     private val firestore: FirebaseFirestore,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    // Exponer flags para UI
+    // -------------------------------------------------------------------------
+    // ESTADOS DE UI Y DATOS
+    // -------------------------------------------------------------------------
+
+    // Estado para indicar si la actividad está cargando inicialmente.
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    // Estado para manejar y exponer errores a la UI.
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    // Estado de la actividad
+    // Contenedor de la actividad actual (null si no se ha cargado o no existe).
     private val _activity = MutableStateFlow<ActivityEntity?>(null)
     val activity: StateFlow<ActivityEntity?> = _activity.asStateFlow()
 
-    // Intentamos leer el activityId de SavedStateHandle y decodificarlo
+    // -------------------------------------------------------------------------
+    // INICIALIZACIÓN Y MANEJO DE ARGUMENTOS
+    // -------------------------------------------------------------------------
+
+    // 1. Intenta leer el activityId de SavedStateHandle.
     private val activityIdRaw: String? = savedStateHandle.get<String>("activityId")
+
+    // 2. Decodifica el ID para manejar URLs o argumentos complejos (aunque el ID de Firestore es simple).
     private val activityId: String? = activityIdRaw?.let {
         try {
             URLDecoder.decode(it, "utf-8")
@@ -48,15 +70,21 @@ class ActivityDetailsViewModel @Inject constructor(
 
     init {
         if (activityId.isNullOrBlank()) {
+            // Manejo de error si el argumento de navegación está ausente.
             Log.e(TAG, "activityId faltante en SavedStateHandle! raw=$activityIdRaw")
             _error.value = "activityId missing"
             _isLoading.value = false
         } else {
             Log.d(TAG, "ActivityDetailsViewModel inicializado con id=$activityId (raw=$activityIdRaw)")
+            // Inicia la escucha en tiempo real de los detalles.
             fetchActivityDetailsStream(activityId)
         }
     }
 
+    /**
+     * Establece un listener de Firestore para actualizar el estado de la actividad en tiempo real.
+     * @param id El ID del documento de la actividad.
+     */
     private fun fetchActivityDetailsStream(id: String) {
         _isLoading.value = true
         firestore.collection("activities").document(id)
@@ -73,20 +101,23 @@ class ActivityDetailsViewModel @Inject constructor(
                     try {
                         val activityObj = snapshot.toObject(ActivityEntity::class.java)
                         if (activityObj != null) {
-                            // Asignamos el id del documento (snapshot.id)
+                            // Asignamos el id del documento para tenerlo en el modelo.
                             _activity.value = activityObj.copy(id = snapshot.id)
                             _error.value = null
                         } else {
+                            // Si toObject falla, reportamos un error interno.
                             Log.w(TAG, "toObject devolvió null para id=$id")
                             _activity.value = null
                             _error.value = "Deserialización fallida"
                         }
                     } catch (ex: Exception) {
+                        // Captura errores de mapeo o formato de datos.
                         Log.e(TAG, "Error mapeando documento id=$id: ${ex.message}")
                         _activity.value = null
                         _error.value = "Error mapeando datos"
                     }
                 } else {
+                    // El documento no existe (fue eliminado o nunca existió).
                     Log.d(TAG, "Documento no existe para id=$id (snapshot=null o !exists)")
                     _activity.value = null
                     _error.value = "No encontrado"
@@ -95,6 +126,14 @@ class ActivityDetailsViewModel @Inject constructor(
             }
     }
 
+    // -------------------------------------------------------------------------
+    // FUNCIONES DE EDICIÓN (CRUD - Update)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Actualiza los datos de control de ejecución y calidad (piezas OK/NO OK y horas).
+     * También recalcula el progreso y el estado basados en la cantidad total requerida.
+     */
     fun updateActivityData(okCount: Int, noOkCount: Int, hours: Int) {
         val id = activityId ?: run {
             Log.e(TAG, "Intento de updateActivityData sin activityId")
@@ -102,12 +141,17 @@ class ActivityDetailsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            // Obtenemos la cantidad total para calcular el progreso.
             val totalRequired = _activity.value?.cantidadTotal ?: 1
             val totalCompleted = okCount + noOkCount
+
+            // Calculamos el nuevo progreso y lo restringimos entre 0 y 100.
             val newProgress = if (totalRequired > 0) {
                 ((totalCompleted.toFloat() / totalRequired.toFloat()) * 100).toInt().coerceIn(0, 100)
             } else 0
-            val newStatus = if (newProgress == 100) "Finalizado" else "En curso"
+
+            // Determinamos el nuevo estado.
+            val newStatus = if (newProgress >= 100) "Finalizado" else "En curso"
 
             val updates = mapOf(
                 "cantidadOk" to okCount,
@@ -124,6 +168,40 @@ class ActivityDetailsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Actualiza los detalles generales y las estimaciones de la actividad.
+     * (Cantidad total, horas y costo estimado, y el defecto).
+     */
+    fun updateGeneralDetails(
+        cantidadTotal: Int,
+        estimadoHoras: String,
+        estimadoCosto: String,
+        defecto: String
+    ) {
+        val id = activityId ?: run {
+            Log.e(TAG, "Intento de updateGeneralDetails sin activityId")
+            return
+        }
+
+        viewModelScope.launch {
+            val updates = mapOf(
+                "cantidadTotal" to cantidadTotal,
+                "estimadoHoras" to estimadoHoras,
+                "estimadoCosto" to estimadoCosto,
+                "defecto" to defecto
+            )
+
+            firestore.collection("activities").document(id)
+                .update(updates)
+                .addOnSuccessListener { Log.d(TAG, "Detalles generales y estimaciones actualizados id=$id.") }
+                .addOnFailureListener { e -> Log.e(TAG, "Error al actualizar detalles generales id=$id: ${e.message}") }
+        }
+    }
+
+    /**
+     * Actualiza el progreso de la actividad mediante el slider.
+     * @param newProgress El nuevo porcentaje de progreso.
+     */
     fun updateProgress(newProgress: Int) {
         val id = activityId ?: run {
             Log.e(TAG, "Intento de updateProgress sin activityId")
@@ -134,12 +212,17 @@ class ActivityDetailsViewModel @Inject constructor(
             val status = if (newProgress == 100) "Finalizado" else "En curso"
 
             firestore.collection("activities").document(id)
+                // Se usa varargs para actualizar múltiples campos de forma concisa.
                 .update("progreso", newProgress, "estado", status)
                 .addOnSuccessListener { Log.d(TAG, "Progreso actualizado id=$id") }
                 .addOnFailureListener { e -> Log.e(TAG, "Error al actualizar progreso id=$id: ${e.message}") }
         }
     }
 
+    /**
+     * Elimina el documento de la actividad de Firestore.
+     * @param onSuccess Callback que se ejecuta tras la eliminación exitosa (usado para la navegación 'onBack').
+     */
     fun deleteActivity(onSuccess: () -> Unit) {
         val id = activityId ?: run {
             Log.e(TAG, "Intento de deleteActivity sin activityId")
