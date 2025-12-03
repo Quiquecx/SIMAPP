@@ -174,9 +174,9 @@ fun ProjectCard(project: ProjectEntity, onClick: () -> Unit, isCompact: Boolean)
     }
 
     val imageRes = when (project.imageType.lowercase()) {
-        "incoming" -> R.drawable.ic_launcher_background
-        "cadenas" -> R.drawable.ic_launcher_background
-        "vcts" -> R.drawable.ic_launcher_background
+        "incoming" -> R.drawable.imgincomingcard
+        "cadenas" -> R.drawable.imgcadenascard
+        "vcts" -> R.drawable.imgvctscard
         else -> R.drawable.ic_launcher_background
     }
 

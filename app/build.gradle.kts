@@ -57,6 +57,17 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.kotlin.serialization.json)
 
+    //Material3
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    // Implementación de Material Design 3
+    implementation("androidx.compose.material3:material3:1.2.1") // O la versión que uses
+
+    // Para los iconos extendidos (como CalendarToday)
+    implementation("androidx.compose.material:material-icons-extended")
+    // Para el DatePicker (si es que lo usaste en Material 3)
+    implementation("androidx.compose.material3:material3-window-size-class")
+
     //datastore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
@@ -66,6 +77,7 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.coroutines.android)
     implementation(libs.androidx.datastore.core)
+    implementation(libs.androidx.foundation)
     testImplementation(libs.coroutines.test)
 
     //firebase
@@ -73,7 +85,6 @@ dependencies {
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
-
 
     //navigation
     implementation(libs.androidx.navigation.compose)
