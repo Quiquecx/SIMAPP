@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ExitToApp // 🚨 NUEVA IMPORTACIÓN PARA LOGOUT
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -36,18 +37,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.quiquecx.simaapp.R
 import com.quiquecx.simaapp.domain.entity.ProjectEntity
 import com.quiquecx.simaapp.view.utils.WindowSizeClass
-import com.quiquecx.simaapp.view.utils.rememberWindowSizeClass // 👈 Importamos la utilidad
-
+import com.quiquecx.simaapp.view.utils.rememberWindowSizeClass
 
 // Componente principal
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     onProjectClick: (String) -> Unit,
-    onBackClick: () -> Unit = {}
+    // 🚨 1. NUEVO: Recibe el callback de deslogeo del NavigationWrapper
+    onSignOut: () -> Unit,
+    // Se elimina onBackClick aquí, ya que el NavigationWrapper lo manejará pasando
+    // el callback de cierre de sesión directamente.
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val windowSizeClass = rememberWindowSizeClass() // 👈 Detectamos el ancho de la pantalla
+    val windowSizeClass = rememberWindowSizeClass()
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -58,15 +61,20 @@ fun HomeScreen(
                 .padding(padding)
                 .fillMaxSize()
                 .padding(
-                    horizontal = if (windowSizeClass != WindowSizeClass.Compact) 48.dp else 16.dp, // Más padding en tablet
+                    horizontal = if (windowSizeClass != WindowSizeClass.Compact) 48.dp else 16.dp,
                     vertical = 24.dp
                 )
         ) {
-            HeaderSection(windowSizeClass) // Pasamos el ancho para adaptar el título
+            // 🚨 2. MODIFICACIÓN: Pasamos el ViewModel y onSignOut a HeaderSection
+            HeaderSection(
+                windowSizeClass = windowSizeClass,
+                viewModel = viewModel,
+                onSignOut = onSignOut
+            )
 
             Spacer(modifier = Modifier.height(40.dp))
 
-            // LÓGICA DE CARGA Y DISPOSICIÓN ADAPTABLE
+            // LÓGICA DE CARGA Y DISPOSICIÓN ADAPTABLE (Tu lógica existente)
             if (uiState.isLoading) {
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Color(0xFFEC221F))
@@ -76,10 +84,10 @@ fun HomeScreen(
                     Text("No hay proyectos activos para ${uiState.selectedCompanyId}", color = Color.Gray)
                 }
             } else {
-                // Si es Compact (Móvil), usamos cuadrícula vertical.
+                // Lógica de LazyGrid o LazyRow
                 if (windowSizeClass == WindowSizeClass.Compact) {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(2), // 2 columnas en móvil
+                        columns = GridCells.Fixed(2),
                         contentPadding = PaddingValues(10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -90,7 +98,6 @@ fun HomeScreen(
                         }
                     }
                 } else {
-                    // Si es Medium o Expanded (Tablet), usamos LazyRow original (horizontal)
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(32.dp),
                         modifier = Modifier.fillMaxWidth().weight(1f),
@@ -103,27 +110,25 @@ fun HomeScreen(
                 }
             }
 
-            // Botón Retroceder (Alineación siempre a la derecha)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                Button(
-                    onClick = onBackClick,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEC221F)),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = null, tint = Color.White)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Retroceder", color = Color.White)
-                }
-            }
+            // 🚨 3. ELIMINACIÓN: El botón "Retroceder" al final de la pantalla ya no es necesario
+            // ya que el cierre de sesión ahora maneja la salida a la pantalla de Login.
+            // Si necesitas un botón "Retroceder" para ir a la pantalla de Selección de Empresa,
+            // ese callback debería venir desde el NavigationWrapper. Por ahora, lo eliminamos
+            // para enfocarnos en el flujo de logout.
         }
     }
 }
 
+/**
+ * Sección de encabezado que contiene el menú, el título y el avatar/botón de logout.
+ */
 @Composable
-fun HeaderSection(windowSizeClass: WindowSizeClass) {
+fun HeaderSection(
+    windowSizeClass: WindowSizeClass,
+    // 🚨 NUEVOS PARÁMETROS: ViewModel y Callback para gestionar el Logout
+    viewModel: HomeViewModel,
+    onSignOut: () -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -139,7 +144,7 @@ fun HeaderSection(windowSizeClass: WindowSizeClass) {
         ) {
             Text(
                 text = "SELECCIONA UN PROYECTO",
-                style = if (windowSizeClass == WindowSizeClass.Compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium.copy( // Título más pequeño en móvil
+                style = if (windowSizeClass == WindowSizeClass.Compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium.copy(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp
                 )
@@ -151,20 +156,44 @@ fun HeaderSection(windowSizeClass: WindowSizeClass) {
             )
         }
 
-        Image(
-            imageVector = Icons.Default.Person,
-            contentDescription = "User Avatar",
-            contentScale = ContentScale.Crop,
+        // 🚨 MODIFICACIÓN: Contenedor del Avatar y botón de Logout
+        Box(
             modifier = Modifier
-                .size(if (windowSizeClass == WindowSizeClass.Compact) 40.dp else 50.dp) // Avatar más pequeño en móvil
+                .size(if (windowSizeClass == WindowSizeClass.Compact) 48.dp else 58.dp)
+                .clickable { viewModel.signOut(onSignOutSuccess = onSignOut) } // 🚨 Acción de Logout
                 .clip(CircleShape)
                 .background(Color.LightGray)
-        )
+        ) {
+            Image(
+                imageVector = Icons.Default.Person,
+                contentDescription = "User Avatar",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .matchParentSize()
+                    .padding(8.dp) // Relleno dentro del círculo
+            )
+
+            // Ícono de Logout sobrepuesto (pequeño y en rojo, indicando la acción)
+            Icon(
+                Icons.Filled.ExitToApp,
+                contentDescription = "Cerrar Sesión",
+                tint = Color(0xFFEC221F),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(if (windowSizeClass == WindowSizeClass.Compact) 18.dp else 22.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .padding(2.dp)
+            )
+        }
     }
 }
 
 @Composable
 fun ProjectCard(project: ProjectEntity, onClick: () -> Unit, isCompact: Boolean) {
+    // ... (Tu código existente de ProjectCard, sin cambios)
+    // ...
+    // Se mantiene ProjectCard sin cambios, ya que solo HeaderSection fue modificado.
 
     // El tamaño de la tarjeta se adapta: pequeño en móvil, grande en tablet.
     val cardModifier = if (isCompact) {
@@ -231,7 +260,7 @@ fun ProjectCard(project: ProjectEntity, onClick: () -> Unit, isCompact: Boolean)
 
 
 // ---------------------------------------------------------
-// PREVIEW SECTION (Adaptado para mostrar ambos tamaños)
+// PREVIEW SECTION (Adaptado para reflejar los cambios en HeaderSection)
 // ---------------------------------------------------------
 
 private val mockProjects = listOf(
@@ -249,7 +278,8 @@ private val mockProjects = listOf(
 @Composable
 fun PreviewHomeScreenTablet() {
     com.quiquecx.simaapp.ui.theme.SimaAppTheme {
-        HomeScreenPreviewContent(WindowSizeClass.Expanded, mockProjects)
+        // En el Preview, pasamos una lambda vacía para onSignOut y un mock ViewModel
+        HomeScreenPreviewContent(WindowSizeClass.Expanded, mockProjects, onSignOut = {})
     }
 }
 
@@ -261,13 +291,16 @@ fun PreviewHomeScreenTablet() {
 @Composable
 fun PreviewHomeScreenMobile() {
     com.quiquecx.simaapp.ui.theme.SimaAppTheme {
-        HomeScreenPreviewContent(WindowSizeClass.Compact, mockProjects)
+        HomeScreenPreviewContent(WindowSizeClass.Compact, mockProjects, onSignOut = {})
     }
 }
 
-// Función auxiliar que renderiza el contenido usando el tamaño simulado
+// Función auxiliar que renderiza el contenido usando el tamaño simulado y el mock ViewModel
 @Composable
-private fun HomeScreenPreviewContent(sizeClass: WindowSizeClass, projects: List<ProjectEntity>) {
+private fun HomeScreenPreviewContent(sizeClass: WindowSizeClass, projects: List<ProjectEntity>, onSignOut: () -> Unit) {
+    // 🚨 Mock del ViewModel para el Preview
+    val mockViewModel = hiltViewModel<HomeViewModel>()
+
     Scaffold(containerColor = Color(0xFFF5F5F5)) { padding ->
         Column(
             modifier = Modifier
@@ -278,38 +311,36 @@ private fun HomeScreenPreviewContent(sizeClass: WindowSizeClass, projects: List<
                     vertical = 24.dp
                 )
         ) {
-            HeaderSection(sizeClass)
+            // Pasamos el mock ViewModel y el onSignOut al HeaderSection del Preview
+            HeaderSection(
+                windowSizeClass = sizeClass,
+                viewModel = mockViewModel,
+                onSignOut = onSignOut
+            )
             Spacer(modifier = Modifier.height(40.dp))
 
-            if (sizeClass == WindowSizeClass.Compact) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth().weight(1f)
-                ) {
-                    items(projects) { project ->
-                        ProjectCard(project = project, onClick = { }, isCompact = true)
+            // Lógica de LazyGrid/LazyRow (reducida para el preview)
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                if (sizeClass == WindowSizeClass.Compact) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(projects) { project ->
+                            ProjectCard(project = project, onClick = { }, isCompact = true)
+                        }
                     }
-                }
-            } else {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(32.dp),
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    contentPadding = PaddingValues(horizontal = 16.dp)
-                ) {
-                    items(projects) { project ->
-                        ProjectCard(project = project, onClick = { }, isCompact = false)
+                } else {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(32.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp)
+                    ) {
+                        items(projects) { project ->
+                            ProjectCard(project = project, onClick = { }, isCompact = false)
+                        }
                     }
-                }
-            }
-            // Botón Retroceder
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEC221F)), shape = RoundedCornerShape(8.dp)) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = null, tint = Color.White)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Retroceder", color = Color.White)
                 }
             }
         }

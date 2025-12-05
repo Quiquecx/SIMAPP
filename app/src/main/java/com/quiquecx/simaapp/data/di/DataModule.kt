@@ -33,19 +33,19 @@
         @Singleton
         fun provideFirebaseAuth(): FirebaseAuth = FirebaseAuth.getInstance()
 
-        // 2. Proveer Firestore (ESTO ES LO QUE TE FALTABA) 👇
+        // 2. Proveer Firestore
         @Provides
         @Singleton
         fun provideFirestore(): FirebaseFirestore {
             return FirebaseFirestore.getInstance()
         }
 
-        // 3. Proveer AuthRepository (Ahora inyecta Auth y Firestore)
+        // 3. Proveer AuthRepository
         @Provides
         @Singleton
         fun provideAuthRepository(
             firebaseAuth: FirebaseAuth,
-            firestore: FirebaseFirestore // 👈 Ahora Hilt sabrá de dónde sacar esto
+            firestore: FirebaseFirestore
         ): AuthRepository {
             return AuthRepositoryImpl(firebaseAuth, firestore)
         }
