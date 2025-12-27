@@ -28,13 +28,11 @@ fun ActivityFormScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    // Estado local para mostrar u ocultar DatePickerDialog
     var showDatePickerDialog by remember { mutableStateOf(false) }
     val datePickerState = rememberDatePickerState(
         initialSelectedDateMillis = state.fechaInicio.time
     )
 
-    // Efecto para manejar navegación y mostrar Toast al guardar con éxito
     LaunchedEffect(state.saveSuccess) {
         if (state.saveSuccess) {
             Toast.makeText(context, "Actividad creada con éxito!", Toast.LENGTH_SHORT).show()
@@ -66,24 +64,28 @@ fun ActivityFormScreen(
             ) {
                 // --- SECCIÓN 1: INFORMACIÓN GENERAL ---
                 item {
-                    Text(
-                        "Información General",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("Información General", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
 
-                // 1. Tipo de Actividad
                 item {
                     OutlinedTextField(
                         value = state.tipo,
                         onValueChange = viewModel::updateTipo,
-                        label = { Text("Tipo de Actividad (Ej: Sorteo, Inspección)") },
+                        label = { Text("Tipo de Actividad (Ej: Sorteo)") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
-                // 2. Proveedor y Material
+                // 🚨 NUEVO: Campo CPM
+                item {
+                    OutlinedTextField(
+                        value = state.cpmId,
+                        onValueChange = viewModel::updateCpmId,
+                        label = { Text("ID de CPM (Identificador de Pago)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
@@ -101,17 +103,27 @@ fun ActivityFormScreen(
                     }
                 }
 
-                // 3. Responsable 👈 NUEVO CAMPO
+                // 🚨 NUEVO: Campo Personas
                 item {
                     OutlinedTextField(
-                        value = state.responsable,
-                        onValueChange = viewModel::updateResponsable,
-                        label = { Text("Responsable de la Tarea") },
+                        value = state.personasInput,
+                        onValueChange = viewModel::updatePersonasInput,
+                        label = { Text("Personas Asignadas (separadas por comas)") },
+                        placeholder = { Text("Ej: Juan, Pedro, Maria") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
-                // 4. Cantidad Total
+                item {
+                    OutlinedTextField(
+                        value = state.responsable,
+                        onValueChange = viewModel::updateResponsable,
+                        label = { Text("Responsable") },
+                        placeholder = { Text("Nombre de quien supervisa") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
                 item {
                     OutlinedTextField(
                         value = state.cantidadTotal,
@@ -122,12 +134,11 @@ fun ActivityFormScreen(
                     )
                 }
 
-                // 5. Fecha de Inicio 👈 NUEVO CAMPO (Date Picker)
                 item {
                     val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
                     OutlinedTextField(
                         value = dateFormat.format(state.fechaInicio),
-                        onValueChange = {}, // Campo de solo lectura
+                        onValueChange = {},
                         label = { Text("Fecha de Inicio") },
                         readOnly = true,
                         trailingIcon = {
@@ -139,65 +150,71 @@ fun ActivityFormScreen(
                     )
                 }
 
-                item { Spacer(modifier = Modifier.height(16.dp)) }
-
-                // --- SECCIÓN 2: ESTIMACIONES Y DETALLES ---
+                // --- SECCIÓN 2: CONTROL DE DEFECTOS (2 TIPOS) ---
                 item {
-                    Text(
-                        "Estimaciones y Detalles",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Text("Control de Defectos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+
+                // Defecto 1
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = state.nombreDefecto1,
+                            onValueChange = { viewModel.updateDefecto1(it, state.cantidadDefecto1) },
+                            label = { Text("Defecto inicial") },
+                            modifier = Modifier.weight(1.5f)
+                        )
+                    }
+                }
+
+
+                item {
+                    OutlinedTextField(
+                        value = state.defectoNota,
+                        onValueChange = viewModel::updateDefectoNota,
+                        label = { Text("Notas adicionales") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2
                     )
                 }
 
-                // 6. Estimado de Horas y Costo 👈 NUEVOS CAMPOS
+                // --- SECCIÓN 3: ESTIMACIONES ---
+                item {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Text("Estimaciones", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = state.estimadoHoras,
                             onValueChange = viewModel::updateEstimadoHoras,
-                            label = { Text("Horas Estimadas") },
+                            label = { Text("Horas Est.") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1f)
                         )
                         OutlinedTextField(
                             value = state.estimadoCosto,
                             onValueChange = viewModel::updateEstimadoCosto,
-                            label = { Text("Costo Estimado") },
+                            label = { Text("Costo Est.") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1f)
                         )
                     }
                 }
 
-                // 7. Defecto Inicial 👈 NUEVO CAMPO
-                item {
-                    OutlinedTextField(
-                        value = state.defecto,
-                        onValueChange = viewModel::updateDefecto,
-                        label = { Text("Defecto Inicial Detectado") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = false,
-                        minLines = 3
-                    )
-                }
-
                 item { Spacer(modifier = Modifier.height(20.dp)) }
 
-                // Mostrar error de guardado
                 if (state.saveError) {
                     item {
-                        Text(
-                            "Error al guardar la actividad. Revise los campos.",
-                            color = MaterialTheme.colorScheme.error
-                        )
+                        Text("Error al guardar. Verifique los campos obligatorios.", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
 
-            // Botón de guardar
             Button(
-                onClick = viewModel::saveActivity,
+                onClick = { viewModel.saveActivity() }, // Lambda
                 enabled = !state.isSaving,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -205,8 +222,8 @@ fun ActivityFormScreen(
             ) {
                 if (state.isSaving) {
                     CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
                 } else {
                     Text("Guardar Nueva Actividad")
@@ -223,8 +240,7 @@ fun ActivityFormScreen(
                 TextButton(
                     onClick = {
                         datePickerState.selectedDateMillis?.let { millis ->
-                            // Convertir milisegundos a objeto Date
-                            viewModel.updateFechaInicio(Date(millis))
+                            viewModel.updateFechaInicio(java.util.Date(millis))
                         }
                         showDatePickerDialog = false
                     }
