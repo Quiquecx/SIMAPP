@@ -1,15 +1,11 @@
-// archivo: IncomingDashboardViewModel.kt
-
 package com.quiquecx.simaapp.view.dashboard
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.toObject
 import com.quiquecx.simaapp.domain.entity.ActivityEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 
 @HiltViewModel
@@ -17,23 +13,42 @@ class IncomingDashboardViewModel @Inject constructor(
     private val firestore: FirebaseFirestore
 ) : ViewModel() {
 
-    // 1. Estado para la lista completa de actividades
-    private val _activities = MutableStateFlow<List<ActivityEntity>>(emptyList())
-    val activities: StateFlow<List<ActivityEntity>> = _activities.asStateFlow()
+    // 1. Lista "cruda" que viene directo de Firebase
+    private val _rawActivities = MutableStateFlow<List<ActivityEntity>>(emptyList())
 
-    // 2. Estado para los Key Performance Indicators (KPIs)
+    // 2. Estado para el texto de búsqueda
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    // 3. Flow combinado: Filtra la lista cruda basándose en la búsqueda
+    // Usamos stateIn para que sea un StateFlow y la UI pueda suscribirse
+    val activities: StateFlow<List<ActivityEntity>> = combine(_rawActivities, _searchQuery) { activities, query ->
+        if (query.isBlank()) {
+            activities
+        } else {
+            activities.filter { activity ->
+                activity.cpmId.contains(query, ignoreCase = true) ||
+                        activity.proveedorId.contains(query, ignoreCase = true) ||
+                        activity.tipo.contains(query, ignoreCase = true) ||
+                        activity.materialId.contains(query, ignoreCase = true)
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    // 4. KPIs
     private val _kpis = MutableStateFlow(KpiData())
     val kpis: StateFlow<KpiData> = _kpis.asStateFlow()
 
     init {
-        // Iniciar la escucha en tiempo real para todas las actividades
         fetchActivitiesStream()
     }
 
-    // Método para la LECTURA (R) en tiempo real de la colección completa
-    // Método para la LECTURA (R) en tiempo real de la colección completa
+    // Función para actualizar el texto de búsqueda desde la UI
+    fun onSearchQueryChange(newQuery: String) {
+        _searchQuery.value = newQuery
+    }
+
     private fun fetchActivitiesStream() {
-        // Escucha en tiempo real toda la colección "activities"
         firestore.collection("activities")
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
@@ -42,35 +57,26 @@ class IncomingDashboardViewModel @Inject constructor(
                 }
 
                 if (snapshot != null) {
-                    // 🚨 CORRECCIÓN CLAVE: Usamos mapNotNull con try-catch para evitar crashes.
                     val activityList = snapshot.documents.mapNotNull { document ->
                         try {
                             val activity = document.toObject(ActivityEntity::class.java)
-
-                            // Si el mapeo es exitoso, aseguramos que el ID se asigna
                             activity?.copy(id = document.id)
                         } catch (ex: Exception) {
-                            // Capturamos el error de mapeo y lo reportamos en el log,
-                            // pero permitimos que la app siga funcionando.
-                            println("❌ Documento fallido encontrado. ID: ${document.id}. Error: ${ex.localizedMessage}")
-                            null // mapNotNull ignora este elemento
+                            println("Documento fallido: ${document.id}. Error: ${ex.localizedMessage}")
+                            null
                         }
                     }
 
-                    _activities.value = activityList
-                    // Recalcular los KPIs cada vez que la lista se actualiza
+                    _rawActivities.value = activityList
                     calculateKpis(activityList)
                 }
             }
     }
 
-    // Función para calcular los KPIs
     private fun calculateKpis(activities: List<ActivityEntity>) {
         val totalActivities = activities.size
         val completedActivities = activities.count { it.estado == "Finalizado" }
         val inProgressActivities = totalActivities - completedActivities
-
-        // Calcular el progreso promedio general
         val totalProgress = activities.sumOf { it.progreso }
         val avgProgress = if (totalActivities > 0) totalProgress / totalActivities else 0
 
@@ -83,10 +89,9 @@ class IncomingDashboardViewModel @Inject constructor(
     }
 }
 
-// Data class para modelar los KPIs
 data class KpiData(
     val totalActivities: Int = 0,
     val completedActivities: Int = 0,
     val inProgressActivities: Int = 0,
-    val avgProgress: Int = 0 // Progreso promedio de todas las actividades
+    val avgProgress: Int = 0
 )

@@ -90,7 +90,7 @@ class ActivityDetailsViewModel @Inject constructor(
 
         val updates = mutableMapOf<String, Any>(
             "timerActive" to true,
-            "timerStartTime" to FieldValue.serverTimestamp() // Usamos la hora del servidor para evitar trampas con el reloj del celular
+            "timerStartTime" to FieldValue.serverTimestamp()
         )
 
         // Si el estado no era "En curso", lo cambiamos
@@ -105,19 +105,22 @@ class ActivityDetailsViewModel @Inject constructor(
     fun pauseTimerAndSave() {
         val id = activityId ?: return
         val current = _activity.value ?: return
-        val startTime = current.timerStartTime ?: return
 
-        // Calculamos la diferencia entre ahora y cuando inició
+        // Si no hay hora de inicio (null), solo apagamos el switch
+        val startTime = current.timerStartTime
+        if (startTime == null) {
+            updateFirestoreFields(mapOf("timerActive" to false))
+            return
+        }
+
         val now = Date()
         val diffInMs = now.time - startTime.time
-
-        // Convertimos milisegundos a horas decimales (ms / 1000 / 60 / 60)
         val sessionHours = diffInMs.toDouble() / 3600000.0
         val newTotalHours = current.horasAcumuladas + sessionHours
 
         val updates = mapOf(
-            "isTimerRunning" to false,
-            "timerStartTime" to FieldValue.delete(), // Limpiamos la hora de inicio
+            "timerActive" to false,
+            "timerStartTime" to FieldValue.delete(), // Eliminamos para que el siguiente inicio sea fresco
             "horasAcumuladas" to newTotalHours
         )
 
@@ -186,13 +189,15 @@ class ActivityDetailsViewModel @Inject constructor(
 
     fun finalizeActivity() {
         val id = activityId ?: return
-        // Si el cronómetro está corriendo al finalizar, lo pausamos primero
+
+        // Si está corriendo, pausamos primero para guardar el tiempo acumulado
         if (_activity.value?.timerActive == true) {
             pauseTimerAndSave()
         }
 
         val updates = mapOf(
             "estado" to "Finalizado",
+            "timerActive" to false,
             "progreso" to 100
         )
         updateFirestoreFields(updates)

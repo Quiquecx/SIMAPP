@@ -233,9 +233,9 @@ fun QualityControlTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
 
 @Composable
 fun TimerTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
-    // Calculamos el tiempo transcurrido localmente basándonos en la hora de inicio de Firestore
     var secondsElapsed by remember { mutableLongStateOf(0L) }
 
+    // Efecto para el conteo en tiempo real
     LaunchedEffect(activity.timerActive, activity.timerStartTime) {
         if (activity.timerActive && activity.timerStartTime != null) {
             while (true) {
@@ -245,7 +245,7 @@ fun TimerTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
                 delay(1000L)
             }
         } else {
-            secondsElapsed = 0L
+            secondsElapsed = 0L // Resetear al pausar
         }
     }
 
@@ -262,45 +262,59 @@ fun TimerTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
             fontWeight = FontWeight.Bold
         )
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(32.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        // FILA DE BOTONES: INICIO / PAUSA
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
             if (!activity.timerActive) {
                 Button(
                     onClick = { viewModel.startTimerAndSetInProgress() },
-                    modifier = Modifier.height(56.dp)
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Iniciar Cronómetro")
+                    Text("Iniciar")
                 }
             } else {
                 Button(
                     onClick = { viewModel.pauseTimerAndSave() },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                    modifier = Modifier.height(56.dp)
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)) // Naranja para pausa
                 ) {
                     Icon(Icons.Default.Pause, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Pausar y Registrar")
+                    Text("Pausar")
                 }
             }
         }
 
+        Spacer(Modifier.height(16.dp))
+
+        // BOTÓN STOP (FINALIZAR ACTIVIDAD)
+        OutlinedButton(
+            onClick = { viewModel.finalizeActivity() },
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+        ) {
+            Icon(Icons.Default.Stop, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Finalizar Actividad")
+        }
+
         Spacer(Modifier.height(40.dp))
 
+        // TARJETA DE TIEMPO ACUMULADO
         Card(
             Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
             Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Total Horas Acumuladas", style = MaterialTheme.typography.titleMedium)
-                // Mostramos con decimales (Double)
                 Text(
                     text = "${String.format("%.4f", activity.horasAcumuladas)} hrs",
                     style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                    fontWeight = FontWeight.ExtraBold
                 )
             }
         }
