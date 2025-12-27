@@ -233,42 +233,75 @@ fun QualityControlTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
 
 @Composable
 fun TimerTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
-    var seconds by remember { mutableIntStateOf(0) }
-    var isRunning by remember { mutableStateOf(false) }
+    // Calculamos el tiempo transcurrido localmente basándonos en la hora de inicio de Firestore
+    var secondsElapsed by remember { mutableLongStateOf(0L) }
 
-    LaunchedEffect(isRunning) {
-        if (isRunning) {
-            viewModel.startTimerAndSetInProgress()
-            while (isRunning) {
+    LaunchedEffect(activity.timerActive, activity.timerStartTime) {
+        if (activity.timerActive && activity.timerStartTime != null) {
+            while (true) {
+                val now = System.currentTimeMillis()
+                val start = activity.timerStartTime.time
+                secondsElapsed = (now - start) / 1000
                 delay(1000L)
-                seconds++
             }
+        } else {
+            secondsElapsed = 0L
         }
     }
 
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Tiempo de Sesión", style = MaterialTheme.typography.labelLarge)
         Text(
-            text = String.format("%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60),
+            text = if (activity.timerActive) "TRABAJO EN CURSO" else "SESIÓN PAUSADA",
+            style = MaterialTheme.typography.labelLarge,
+            color = if (activity.timerActive) Color(0xFF4CAF50) else Color.Gray
+        )
+
+        Text(
+            text = String.format("%02d:%02d:%02d", secondsElapsed / 3600, (secondsElapsed % 3600) / 60, secondsElapsed % 60),
             style = MaterialTheme.typography.displayLarge,
             fontWeight = FontWeight.Bold
         )
+
         Spacer(Modifier.height(24.dp))
+
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(onClick = { isRunning = !isRunning }, colors = ButtonDefaults.buttonColors(containerColor = if(isRunning) Color.Red else MaterialTheme.colorScheme.primary)) {
-                Icon(if(isRunning) Icons.Default.Close else Icons.Default.PlayArrow, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(if(isRunning) "Pausar" else "Iniciar")
-            }
-            if (seconds > 0) {
-                OutlinedButton(onClick = { viewModel.saveTimerSession(seconds / 60); seconds = 0; isRunning = false }) { Text("Guardar") }
+            if (!activity.timerActive) {
+                Button(
+                    onClick = { viewModel.startTimerAndSetInProgress() },
+                    modifier = Modifier.height(56.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Iniciar Cronómetro")
+                }
+            } else {
+                Button(
+                    onClick = { viewModel.pauseTimerAndSave() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                    modifier = Modifier.height(56.dp)
+                ) {
+                    Icon(Icons.Default.Pause, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Pausar y Registrar")
+                }
             }
         }
+
         Spacer(Modifier.height(40.dp))
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Horas Acumuladas")
-                Text("${activity.horasAcumuladas} hrs", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+
+        Card(
+            Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        ) {
+            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Total Horas Acumuladas", style = MaterialTheme.typography.titleMedium)
+                // Mostramos con decimales (Double)
+                Text(
+                    text = "${String.format("%.4f", activity.horasAcumuladas)} hrs",
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             }
         }
     }

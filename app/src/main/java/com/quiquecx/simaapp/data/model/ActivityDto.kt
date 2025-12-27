@@ -15,25 +15,28 @@ data class ActivityDto(
     val responsable: String? = null,
     val fechaInicio: Date? = null,
 
-    // --- NUEVOS CAMPOS ---
     val cpmId: String? = null,
     val people: List<String>? = null,
-    val ultimaSesionInicio: Date? = null,
+
+    // --- NUEVOS CAMPOS PERSISTENCIA ---
+    val timerActive: Boolean? = null,
+    val timerStartTime: Date? = null,
     val timerHistory: List<TimerEntry>? = null,
-    val defectos: List<DefectEntry>? = null, // La lista nueva
+
+    val defectos: List<DefectEntry>? = null,
     val defectoNota: String? = null,
 
-    // --- CAMPOS EXISTENTES ---
     val cantidadTotal: Int? = null,
     val cantidadOk: Int? = null,
     val cantidadNoOk: Int? = null,
-    val horasAcumuladas: Int? = null,
+
+    // --- CAMBIO A DOUBLE ---
+    val horasAcumuladas: Double? = null,
     val estimadoHoras: String? = null,
     val estimadoCosto: String? = null,
     val estado: String? = null,
     val progreso: Int? = null
 ) {
-    // Mapeo a Entity (Data -> Domain)
     fun toEntity(): ActivityEntity? {
         return if (id != null && tipo != null && proveedorId != null && materialId != null && fechaInicio != null) {
             ActivityEntity(
@@ -43,27 +46,30 @@ data class ActivityDto(
                 materialId = materialId,
                 responsable = responsable ?: "Equipo Sima",
                 fechaInicio = fechaInicio,
-                // Mapeo de nuevos campos con valores por defecto
                 cpmId = cpmId ?: "",
                 people = people ?: emptyList(),
-                ultimaSesionInicio = ultimaSesionInicio,
+
+                // Mapeo nuevos campos
+                timerActive = timerActive ?: false,
+                timerStartTime = timerStartTime,
                 timerHistory = timerHistory ?: emptyList(),
+
                 defectos = defectos ?: emptyList(),
                 defectoNota = defectoNota ?: "",
-                // Cantidades y progreso
                 cantidadTotal = cantidadTotal ?: 0,
                 cantidadOk = cantidadOk ?: 0,
                 cantidadNoOk = cantidadNoOk ?: 0,
-                horasAcumuladas = horasAcumuladas ?: 0,
+
+                // Mapeo Double
+                horasAcumuladas = horasAcumuladas ?: 0.0,
                 estimadoHoras = estimadoHoras ?: "0",
                 estimadoCosto = estimadoCosto ?: "0",
-                estado = estado ?: "En curso",
+                estado = estado ?: "Pendiente",
                 progreso = progreso ?: 0
             )
         } else null
     }
 
-    // Mapeo desde Entity (Domain -> Data)
     companion object {
         fun fromEntity(entity: ActivityEntity): ActivityDto {
             return ActivityDto(
@@ -73,14 +79,16 @@ data class ActivityDto(
                 materialId = entity.materialId,
                 responsable = entity.responsable,
                 fechaInicio = entity.fechaInicio,
-                // Nuevos campos
                 cpmId = entity.cpmId,
                 people = entity.people,
-                ultimaSesionInicio = entity.ultimaSesionInicio,
+
+                // Nuevos campos
+                timerActive = entity.timerActive,
+                timerStartTime = entity.timerStartTime,
                 timerHistory = entity.timerHistory,
+
                 defectos = entity.defectos,
                 defectoNota = entity.defectoNota,
-                // Existentes
                 cantidadTotal = entity.cantidadTotal,
                 cantidadOk = entity.cantidadOk,
                 cantidadNoOk = entity.cantidadNoOk,

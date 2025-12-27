@@ -17,9 +17,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.net.URLDecoder
+import java.util.Date
 import javax.inject.Inject
-
-private const val TAG = "ActivityDetailsVM"
 
 @HiltViewModel
 class ActivityDetailsViewModel @Inject constructor(
@@ -64,9 +63,9 @@ class ActivityDetailsViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
                 if (snapshot != null && snapshot.exists()) {
+                    // Firestore mapeará automáticamente los números a Double y las fechas a Date/Timestamp
                     val activityObj = snapshot.toObject(ActivityEntity::class.java)
                     _activity.value = activityObj?.copy(id = snapshot.id)
-                    _error.value = null
                 }
                 _isLoading.value = false
             }
@@ -80,16 +79,61 @@ class ActivityDetailsViewModel @Inject constructor(
             }
     }
 
-    // --- LÓGICA DE CONTROL DE CALIDAD (OK MANUAL + PROGRESO) ---
+    // --- LÓGICA DE CRONÓMETRO PERSISTENTE (MODIFICADA) ---
+
+    fun startTimerAndSetInProgress() {
+        val id = activityId ?: return
+        val current = _activity.value ?: return
+
+        // Si ya está corriendo, no hacemos nada
+        if (current.timerActive) return
+
+        val updates = mutableMapOf<String, Any>(
+            "timerActive" to true,
+            "timerStartTime" to FieldValue.serverTimestamp() // Usamos la hora del servidor para evitar trampas con el reloj del celular
+        )
+
+        // Si el estado no era "En curso", lo cambiamos
+        if (current.estado != "En curso") {
+            updates["estado"] = "En curso"
+        }
+
+        updateFirestoreFields(updates)
+        logActivityChange(id, "Cronómetro", "Estado", "Iniciado / En curso")
+    }
+
+    fun pauseTimerAndSave() {
+        val id = activityId ?: return
+        val current = _activity.value ?: return
+        val startTime = current.timerStartTime ?: return
+
+        // Calculamos la diferencia entre ahora y cuando inició
+        val now = Date()
+        val diffInMs = now.time - startTime.time
+
+        // Convertimos milisegundos a horas decimales (ms / 1000 / 60 / 60)
+        val sessionHours = diffInMs.toDouble() / 3600000.0
+        val newTotalHours = current.horasAcumuladas + sessionHours
+
+        val updates = mapOf(
+            "isTimerRunning" to false,
+            "timerStartTime" to FieldValue.delete(), // Limpiamos la hora de inicio
+            "horasAcumuladas" to newTotalHours
+        )
+
+        updateFirestoreFields(updates)
+        logActivityChange(id, "Cronómetro", "Pausado", "Sesión: ${String.format("%.4f", sessionHours)} hrs")
+    }
+
+    // --- CONTROL DE CALIDAD ---
     fun updateQualityData(okCount: Int, newDefects: List<DefectEntry>) {
         val id = activityId ?: return
         val current = _activity.value ?: return
 
         val newTotalNoOk = newDefects.sumOf { it.count }
 
-        // El progreso se basa en: (Piezas OK / Cantidad Total definida en detalles) * 100
         val progress = if (current.cantidadTotal > 0) {
-            ((okCount.toFloat() / current.cantidadTotal.toFloat()) * 100).toInt().coerceIn(0, 100)
+            ((okCount.toDouble() / current.cantidadTotal.toDouble()) * 100).toInt().coerceIn(0, 100)
         } else 0
 
         val updates = mapOf(
@@ -100,25 +144,10 @@ class ActivityDetailsViewModel @Inject constructor(
         )
 
         updateFirestoreFields(updates)
-        logActivityChange(id, "Calidad", "Actualización", "OK: $okCount, No OK: $newTotalNoOk, Progreso: $progress%")
+        logActivityChange(id, "Calidad", "Actualización", "OK: $okCount, Progreso: $progress%")
     }
 
-    fun addNewDefectType(name: String) {
-        val id = activityId ?: return
-        val current = _activity.value ?: return
-        if (current.defectos.any { it.name.equals(name, ignoreCase = true) }) return
-
-        val newDefect = DefectEntry(name = name, count = 0)
-        viewModelScope.launch {
-            try {
-                firestore.collection("activities").document(id)
-                    .update("defectos", FieldValue.arrayUnion(newDefect))
-                logActivityChange(id, "Estructura", "Nuevo defecto", name)
-            } catch (e: Exception) { _error.value = e.message }
-        }
-    }
-
-    // --- LÓGICA DE PERSONAL (PEOPLE) ---
+    // --- PERSONAL ---
     fun addPersonToActivity(name: String) {
         val id = activityId ?: return
         if (name.isBlank()) return
@@ -142,7 +171,7 @@ class ActivityDetailsViewModel @Inject constructor(
         }
     }
 
-    // --- LÓGICA DE ACTUALIZACIÓN GENERAL (INFO EDITABLE) ---
+    // --- ACTUALIZACIÓN GENERAL ---
     fun updateGeneralDetails(cantidadTotal: Int, estHoras: String, estCosto: String, nota: String, cpm: String) {
         val updates = mapOf(
             "cantidadTotal" to cantidadTotal,
@@ -155,32 +184,22 @@ class ActivityDetailsViewModel @Inject constructor(
         logActivityChange(activityId ?: "", "Detalles", "Edición manual", "Actualización general")
     }
 
-    // --- ESTADO AUTOMÁTICO Y TIEMPO ---
-    fun startTimerAndSetInProgress() {
-        val current = _activity.value ?: return
-        if (current.estado != "En curso" && current.estado != "Finalizado") {
-            updateFirestoreFields(mapOf("estado" to "En curso"))
-            logActivityChange(current.id, "Estado", current.estado, "En curso")
-        }
-    }
-
     fun finalizeActivity() {
         val id = activityId ?: return
+        // Si el cronómetro está corriendo al finalizar, lo pausamos primero
+        if (_activity.value?.timerActive == true) {
+            pauseTimerAndSave()
+        }
+
         val updates = mapOf(
             "estado" to "Finalizado",
-            "progreso" to 100 // Al finalizar forzamos el 100%
+            "progreso" to 100
         )
         updateFirestoreFields(updates)
         logActivityChange(id, "Estado", "Cambio", "Finalizado")
     }
 
-    fun saveTimerSession(minutes: Int) {
-        val current = _activity.value ?: return
-        val newHours = current.horasAcumuladas + (minutes.toFloat() / 60f)
-        updateFirestoreFields(mapOf("horasAcumuladas" to newHours))
-        logActivityChange(current.id, "Cronómetro", "Sesión", "+$minutes min")
-    }
-
+    // --- FUNCIONES AUXILIARES ---
     private fun updateFirestoreFields(updates: Map<String, Any>) {
         val id = activityId ?: return
         viewModelScope.launch {
@@ -206,6 +225,21 @@ class ActivityDetailsViewModel @Inject constructor(
         activityId?.let { id ->
             firestore.collection("activities").document(id).delete()
                 .addOnSuccessListener { onBack() }
+        }
+    }
+
+    fun addNewDefectType(name: String) {
+        val id = activityId ?: return
+        val current = _activity.value ?: return
+        if (current.defectos.any { it.name.equals(name, ignoreCase = true) }) return
+
+        val newDefect = DefectEntry(name = name, count = 0)
+        viewModelScope.launch {
+            try {
+                firestore.collection("activities").document(id)
+                    .update("defectos", FieldValue.arrayUnion(newDefect))
+                logActivityChange(id, "Estructura", "Nuevo defecto", name)
+            } catch (e: Exception) { _error.value = e.message }
         }
     }
 }

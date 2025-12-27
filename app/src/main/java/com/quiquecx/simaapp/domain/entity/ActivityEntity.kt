@@ -3,7 +3,6 @@ package com.quiquecx.simaapp.domain.entity
 import java.util.Date
 
 data class ActivityEntity(
-    // Información General
     val id: String = "",
     val tipo: String = "",
     val proveedorId: String = "",
@@ -11,38 +10,38 @@ data class ActivityEntity(
     val responsable: String = "Equipo Sima",
     val fechaInicio: Date = Date(),
 
-    //Cambios
     val cpmId: String = "",
     val people: List<String> = emptyList(),
-    val ultimaSesionInicio: Date? = null,
+
+    // --- CAMBIOS PARA CRONÓMETRO PRO ---
+    val timerActive: Boolean = false,    // Indica si el cronómetro está activo
+    val timerStartTime: Date? = null,       // La hora exacta en que se le dio "Iniciar"
     val timerHistory: List<TimerEntry> = emptyList(),
 
-    // --- CAMBIO PARA DEFECTOS MÚLTIPLES ---
-    val defectos: List<DefectEntry> = emptyList(), // Ahora soporta 1, 2 o más defectos
+    val defectos: List<DefectEntry> = emptyList(),
     val defectoNota: String = "",
 
-    // Cantidades
     val cantidadTotal: Int = 0,
     val cantidadOk: Int = 0,
     val cantidadNoOk: Int = 0,
 
-    // Estado y Progreso
-    val estado: String = "En curso",
+    val estado: String = "Pendiente",
     val progreso: Int = 0,
 
-    // Tiempos y Costos
-    val horasAcumuladas: Int = 0,
-    val estimadoHoras: String = "0", // String
-    val estimadoCosto: String = "0" // String
+    // --- CAMBIO A DOUBLE PARA DECIMALES ---
+    val horasAcumuladas: Double = 0.0,
+    val estimadoHoras: String = "0",
+    val estimadoCosto: String = "0"
 )
-    data class TimerEntry(
-        val startTime: Date,
-        val endTime: Date?,
-        val durationMinutes: Int,
-        val user: String
-    )
 
-    data class DefectEntry(
-        val name: String = "",
-        val count: Int = 0
-    )
+data class TimerEntry(
+    val startTime: Date,
+    val endTime: Date?,
+    val durationMinutes: Double, // También en Double para precisión
+    val user: String
+)
+
+data class DefectEntry(
+    val name: String = "",
+    val count: Int = 0
+)
