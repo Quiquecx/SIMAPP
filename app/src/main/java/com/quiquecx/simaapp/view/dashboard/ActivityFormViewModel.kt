@@ -14,21 +14,18 @@ import kotlinx.coroutines.launch
 import java.util.Date
 import javax.inject.Inject
 
-// --- ESTADO DE LA UI ACTUALIZADO ---
+// --- ESTADO DE LA UI ACTUALIZADO CON PROJECT ID ---
 data class ActivityUiState(
+    val projectId: String = "", // 🚨 Vital para separar BorgWarner de Hella
     val tipo: String = "",
     val proveedorId: String = "",
     val materialId: String = "",
     val responsable: String = "Equipo Sima",
     val cantidadTotal: String = "",
-
-    // [ ] Añadir campo de CPM
     val cpmId: String = "",
-
-    // [ ] Añadir campo de personas (como String separado por comas para el input)
     val personasInput: String = "",
 
-    // [ ] Manejar 2 defectos diferentes
+    // Manejo de defectos
     val nombreDefecto1: String = "",
     val cantidadDefecto1: String = "0",
     val nombreDefecto2: String = "",
@@ -39,6 +36,7 @@ data class ActivityUiState(
     val estimadoCosto: String = "0",
     val fechaInicio: Date = Date(),
 
+    // Estados de control
     val isSaving: Boolean = false,
     val saveSuccess: Boolean = false,
     val saveError: Boolean = false
@@ -46,11 +44,18 @@ data class ActivityUiState(
 
 @HiltViewModel
 class ActivityFormViewModel @Inject constructor(
-    private val repository: DashboardRepository // Usamos el repositorio, no firestore directamente
+    private val repository: DashboardRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ActivityUiState())
     val uiState: StateFlow<ActivityUiState> = _uiState.asStateFlow()
+
+    /**
+     * Inicializa el ID del proyecto recibido desde la navegación.
+     */
+    fun initProject(projectId: String) {
+        _uiState.update { it.copy(projectId = projectId) }
+    }
 
     // --- MANEJADORES DE ESTADO ---
     fun updateTipo(newValue: String) { _uiState.update { it.copy(tipo = newValue) } }
@@ -64,10 +69,10 @@ class ActivityFormViewModel @Inject constructor(
         _uiState.update { it.copy(cantidadTotal = newValue.filter { c -> c.isDigit() }) }
     }
 
-    // Manejadores para los 2 defectos
     fun updateDefecto1(nombre: String, cantidad: String) {
         _uiState.update { it.copy(nombreDefecto1 = nombre, cantidadDefecto1 = cantidad.filter { c -> c.isDigit() }) }
     }
+
     fun updateDefecto2(nombre: String, cantidad: String) {
         _uiState.update { it.copy(nombreDefecto2 = nombre, cantidadDefecto2 = cantidad.filter { c -> c.isDigit() }) }
     }
@@ -80,18 +85,24 @@ class ActivityFormViewModel @Inject constructor(
         _uiState.update { it.copy(fechaInicio = newDate) }
     }
 
+    /**
+     * Ejecuta el proceso de guardado enviando la entidad al repositorio.
+     */
     fun saveActivity() {
         val state = _uiState.value
 
-        if (state.tipo.isBlank() || state.cantidadTotal.toIntOrNull() == null) {
+        // Validación básica obligatoria
+        if (state.tipo.isBlank() || state.projectId.isBlank() || state.cantidadTotal.toIntOrNull() == null) {
             _uiState.update { it.copy(saveError = true) }
             return
         }
 
-        // 1. Procesar Personas (String a Lista)
-        val listaPersonas = state.personasInput.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        // 1. Procesar Personas (String separado por comas a Lista)
+        val listaPersonas = state.personasInput.split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 
-        // 2. Procesar Defectos (Crear lista de DefectEntry)
+        // 2. Procesar Defectos
         val listaDefectos = mutableListOf<DefectEntry>()
         if (state.nombreDefecto1.isNotBlank()) {
             listaDefectos.add(DefectEntry(state.nombreDefecto1, state.cantidadDefecto1.toIntOrNull() ?: 0))
@@ -100,11 +111,12 @@ class ActivityFormViewModel @Inject constructor(
             listaDefectos.add(DefectEntry(state.nombreDefecto2, state.cantidadDefecto2.toIntOrNull() ?: 0))
         }
 
-        // 3. Calcular cantidadNoOk automáticamente
         val totalNoOk = listaDefectos.sumOf { it.count }
 
+        // 3. Crear Entidad con el projectId dinámico
         val newActivity = ActivityEntity(
-            id = "", // El Repositorio/Firestore generará el ID
+            id = "",
+            projectId = state.projectId, // 🚨 Asignación clave para el filtrado en Dashboard
             tipo = state.tipo.trim(),
             proveedorId = state.proveedorId.trim(),
             materialId = state.materialId.trim(),
@@ -120,7 +132,8 @@ class ActivityFormViewModel @Inject constructor(
             estimadoHoras = state.estimadoHoras,
             estimadoCosto = state.estimadoCosto,
             estado = "En curso",
-            progreso = 0
+            progreso = 0,
+            timerActive = false // Inicia pausado por defecto
         )
 
         _uiState.update { it.copy(isSaving = true, saveError = false) }

@@ -4,6 +4,7 @@ import java.util.Date
 
 data class ActivityEntity(
     val id: String = "",
+    val projectId: String = "",
     val tipo: String = "",
     val proveedorId: String = "",
     val materialId: String = "",

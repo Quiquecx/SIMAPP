@@ -28,7 +28,8 @@ import kotlinx.coroutines.delay
 fun IncomingDashboardScreen(
     viewModel: IncomingDashboardViewModel = hiltViewModel(),
     onNavigateToCreate: () -> Unit,
-    onNavigateToDetails: (activityId: String) -> Unit
+    onNavigateToDetails: (activityId: String) -> Unit,
+    onBack: () -> Unit
 ) {
     // Escuchamos actividades filtradas, KPIs y la consulta de búsqueda
     val activities by viewModel.activities.collectAsStateWithLifecycle()
@@ -49,7 +50,13 @@ fun IncomingDashboardScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("SIMA - Incoming", fontWeight = FontWeight.Bold) }
+                title = { Text("SIMA - Incoming", fontWeight = FontWeight.Bold) },
+                // 2. Agregamos el icono de navegación hacia atrás
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Regresar")
+                    }
+                }
             )
         },
         floatingActionButton = {

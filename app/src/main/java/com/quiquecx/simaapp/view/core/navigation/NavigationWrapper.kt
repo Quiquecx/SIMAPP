@@ -25,10 +25,11 @@ import com.quiquecx.simaapp.view.auth.register.RegisterScreen
 import com.quiquecx.simaapp.view.home.HomeScreen
 import com.quiquecx.simaapp.view.selectcompany.CompanySelectionScreen
 import com.quiquecx.simaapp.view.dashboard.IncomingDashboardScreen
+import com.quiquecx.simaapp.view.dashboard.IncomingDashboardViewModel
 import com.quiquecx.simaapp.view.dashboard.ActivityFormScreen
+import com.quiquecx.simaapp.view.dashboard.ActivityFormViewModel
 import com.quiquecx.simaapp.view.dashboard.ActivityDetailsScreen
 import com.quiquecx.simaapp.view.dashboard.ActivityDetailsViewModel
-
 
 /**
  * Objeto que centraliza todas las rutas de navegación de la aplicación SIMA.
@@ -40,66 +41,58 @@ object SimaRoutes {
     const val COMPANY_SELECTION = "companySelection"
     const val HOME = "home"
 
-    const val DASHBOARD_INCOMING = "dashboard_incoming"
-    const val ACTIVITY_FORM = "activity_form"
+    // Ruta dinámica para el Dashboard
+    const val DASHBOARD_BASE = "dashboard"
+    const val DASHBOARD = "$DASHBOARD_BASE/{projectId}"
+
+    // Ruta dinámica para el Formulario (Corregida)
+    const val ACTIVITY_FORM_BASE = "activity_form"
+    const val ACTIVITY_FORM = "$ACTIVITY_FORM_BASE/{projectId}"
+
     const val ACTIVITY_DETAILS_BASE = "activity_details"
     const val ACTIVITY_DETAILS = "$ACTIVITY_DETAILS_BASE/{activityId}"
 
-    /**
-     * Genera la ruta completa para navegar a los detalles de una actividad,
-     * codificando el ID para su uso seguro en la URL.
-     */
+    fun dashboardPath(projectId: String): String = "$DASHBOARD_BASE/$projectId"
+
+    // Generador de ruta para el formulario
+    fun activityFormPath(projectId: String): String = "$ACTIVITY_FORM_BASE/$projectId"
+
     fun activityDetailsPath(activityId: String): String {
         val encodedId = URLEncoder.encode(activityId, StandardCharsets.UTF_8.toString())
         return "$ACTIVITY_DETAILS_BASE/$encodedId"
     }
 }
 
-/**
- * Contenedor principal de navegación que define el NavHost y todas las transiciones.
- * Gestiona el flujo de la aplicación incluyendo la persistencia de la sesión.
- */
 @Composable
 fun NavigationWrapper() {
     val navController: NavHostController = rememberNavController()
 
-    // El punto de partida ahora es SPLASH para la verificación de autenticación
     NavHost(navController = navController, startDestination = SimaRoutes.SPLASH) {
 
-        // ---------------------------------------------------------------------
-        // 1. SPLASH SCREEN (VERIFICACIÓN DE SESIÓN)
-        // ---------------------------------------------------------------------
+        // 1. SPLASH SCREEN
         composable(SimaRoutes.SPLASH) {
             val viewModel: SplashViewModel = hiltViewModel()
-
             LaunchedEffect(Unit) {
                 if (viewModel.isUserAuthenticated()) {
-                    // Si está autenticado, salta a la selección de empresas
                     navController.navigate(SimaRoutes.COMPANY_SELECTION) {
-                        // Limpia la pila para evitar regresar al splash o login
                         popUpTo(SimaRoutes.SPLASH) { inclusive = true }
                     }
                 } else {
-                    // Si no está autenticado, va a la pantalla de Login
                     navController.navigate(SimaRoutes.LOGIN) {
                         popUpTo(SimaRoutes.SPLASH) { inclusive = true }
                     }
                 }
             }
-            // Muestra un indicador de carga mientras verifica la sesión
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
 
-        // ---------------------------------------------------------------------
         // 2. MÓDULO DE AUTENTICACIÓN
-        // ---------------------------------------------------------------------
         composable(SimaRoutes.LOGIN) {
             LoginScreen(
                 navigateToRegister = { navController.navigate(SimaRoutes.REGISTER) },
                 navigateToCompanySelection = {
-                    // Tras el login exitoso, navegar a la selección de empresa y limpiar la pila
                     navController.navigate(SimaRoutes.COMPANY_SELECTION) {
                         popUpTo(SimaRoutes.LOGIN) { inclusive = true }
                     }
@@ -111,13 +104,10 @@ fun NavigationWrapper() {
             RegisterScreen(navigateBack = { navController.popBackStack() })
         }
 
-        // ---------------------------------------------------------------------
         // 3. SELECCIÓN DE EMPRESA Y HOME
-        // ---------------------------------------------------------------------
         composable(SimaRoutes.COMPANY_SELECTION) {
             CompanySelectionScreen(
                 onNavigateToHome = {
-                    // Tras seleccionar empresa, navegar al HOME y limpiar la pila
                     navController.navigate(SimaRoutes.HOME) {
                         popUpTo(SimaRoutes.COMPANY_SELECTION) { inclusive = true }
                     }
@@ -127,39 +117,65 @@ fun NavigationWrapper() {
 
         composable(SimaRoutes.HOME) {
             HomeScreen(
-                // 🚨 FUNCIÓN DE LOGOUT: Regresa al Login y limpia la pila para cerrar sesión de forma segura
                 onSignOut = {
                     navController.navigate(SimaRoutes.LOGIN) {
-                        // Elimina todas las pantallas (incluyendo HOME y COMPANY_SELECTION)
                         popUpTo(SimaRoutes.HOME) { inclusive = true }
                     }
                 },
                 onProjectClick = { projectId ->
-                    if (projectId == "proy_incoming") {
-                        navController.navigate(SimaRoutes.DASHBOARD_INCOMING)
-                    }
+                    navController.navigate(SimaRoutes.dashboardPath(projectId))
                 }
             )
         }
 
-        // ---------------------------------------------------------------------
-        // 4. MÓDULO DE DASHBOARD (INCOMING)
-        // ---------------------------------------------------------------------
-        composable(SimaRoutes.DASHBOARD_INCOMING) {
+        // 4. MÓDULO DE DASHBOARD UNIVERSAL
+        composable(
+            route = SimaRoutes.DASHBOARD,
+            arguments = listOf(navArgument("projectId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val projectId = backStackEntry.arguments?.getString("projectId") ?: ""
+            val viewModel: IncomingDashboardViewModel = hiltViewModel()
+
+            LaunchedEffect(projectId) {
+                viewModel.initProject(projectId)
+            }
+
             IncomingDashboardScreen(
+                viewModel = viewModel,
                 onNavigateToDetails = { activityId ->
                     navController.navigate(SimaRoutes.activityDetailsPath(activityId))
                 },
                 onNavigateToCreate = {
-                    navController.navigate(SimaRoutes.ACTIVITY_FORM)
+                    // Navegación corregida pasando el projectId
+                    navController.navigate(SimaRoutes.activityFormPath(projectId))
+                },
+                onBack = {
+                    // Esto cerrará el dashboard y volverá a la pantalla anterior (ej. Selección de Proyecto)
+                    navController.popBackStack()
                 }
             )
         }
 
-        composable(SimaRoutes.ACTIVITY_FORM) {
-            ActivityFormScreen(onBack = { navController.popBackStack() })
+        // 5. FORMULARIO DE ACTIVIDAD (Corregido con argumentos)
+        composable(
+            route = SimaRoutes.ACTIVITY_FORM,
+            arguments = listOf(navArgument("projectId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val projectId = backStackEntry.arguments?.getString("projectId") ?: ""
+            val viewModel: ActivityFormViewModel = hiltViewModel()
+
+            // Inicializamos el ViewModel con el ID del proyecto recibido
+            LaunchedEffect(projectId) {
+                viewModel.initProject(projectId)
+            }
+
+            ActivityFormScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() }
+            )
         }
 
+        // 6. DETALLES DE ACTIVIDAD
         composable(
             route = SimaRoutes.ACTIVITY_DETAILS,
             arguments = listOf(navArgument("activityId") { type = NavType.StringType })

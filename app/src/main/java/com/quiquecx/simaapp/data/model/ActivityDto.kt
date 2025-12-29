@@ -9,6 +9,7 @@ import java.util.Date
 data class ActivityDto(
     @DocumentId
     val id: String? = null,
+    val projectId: String? = null, // 🚨 AGREGADO: Crucial para el filtrado por empresa
     val tipo: String? = null,
     val proveedorId: String? = null,
     val materialId: String? = null,
@@ -38,9 +39,11 @@ data class ActivityDto(
     val progreso: Int? = null
 ) {
     fun toEntity(): ActivityEntity? {
-        return if (id != null && tipo != null && proveedorId != null && materialId != null && fechaInicio != null) {
+        // Añadimos projectId a la validación de nulos si quieres que sea obligatorio
+        return if (id != null && projectId != null && tipo != null && proveedorId != null && materialId != null && fechaInicio != null) {
             ActivityEntity(
                 id = id,
+                projectId = projectId, // 🚨 MAPEADO
                 tipo = tipo,
                 proveedorId = proveedorId,
                 materialId = materialId,
@@ -74,6 +77,7 @@ data class ActivityDto(
         fun fromEntity(entity: ActivityEntity): ActivityDto {
             return ActivityDto(
                 id = entity.id.ifEmpty { null },
+                projectId = entity.projectId, // 🚨 MAPEADO HACIA FIREBASE
                 tipo = entity.tipo,
                 proveedorId = entity.proveedorId,
                 materialId = entity.materialId,

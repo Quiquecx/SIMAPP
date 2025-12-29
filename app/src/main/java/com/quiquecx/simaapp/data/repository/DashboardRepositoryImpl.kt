@@ -23,7 +23,7 @@ class DashboardRepositoryImpl @Inject constructor(
     override fun getActivitiesStream(projectId: String): Flow<List<ActivityEntity>> {
 
         return activitiesCollection
-            .whereEqualTo("proyectoId", projectId)
+            .whereEqualTo("projectId", projectId)
             .orderBy("fechaInicio", Query.Direction.DESCENDING)
             .dataObjects<ActivityDto>() // Mapea el stream a ActivityDto
             .map { dtos ->
