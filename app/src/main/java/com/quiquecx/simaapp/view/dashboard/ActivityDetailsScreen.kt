@@ -188,14 +188,23 @@ fun QualityControlTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
     var isEditMode by remember { mutableStateOf(false) }
     var showConfirmDialog by remember { mutableStateOf(false) }
 
+    // Estado para el nuevo defecto que se quiera añadir
+    var newDefectName by remember { mutableStateOf("") }
+
     var currentOkInput by remember { mutableStateOf("") }
+
+    // Usamos deriveState o keys para que se actualice si la activity cambia
     val currentDefectsInput = remember(activity.defectos) {
-        mutableStateMapOf<String, String>().apply { activity.defectos.forEach { put(it.name, "") } }
+        mutableStateMapOf<String, String>().apply {
+            activity.defectos.forEach { put(it.name, "") }
+        }
     }
 
     var adjustedOkTotal by remember { mutableStateOf(activity.cantidadOk.toString()) }
     val adjustedDefectsMap = remember(activity.defectos) {
-        mutableStateMapOf<String, String>().apply { activity.defectos.forEach { put(it.name, it.count.toString()) } }
+        mutableStateMapOf<String, String>().apply {
+            activity.defectos.forEach { put(it.name, it.count.toString()) }
+        }
     }
 
     if (showConfirmDialog) {
@@ -206,7 +215,10 @@ fun QualityControlTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
             confirmButton = {
                 TextButton(onClick = {
                     val okFixed = adjustedOkTotal.toIntOrNull() ?: 0
-                    val defectsFixed = activity.defectos.map { DefectEntry(it.name, adjustedDefectsMap[it.name]?.toIntOrNull() ?: 0) }
+                    // Mapeamos los defectos ajustados
+                    val defectsFixed = adjustedDefectsMap.map { (name, count) ->
+                        DefectEntry(name, count.toIntOrNull() ?: 0)
+                    }
                     viewModel.adjustQualityTotals(okFixed, defectsFixed)
                     showConfirmDialog = false
                     isEditMode = false
@@ -217,6 +229,7 @@ fun QualityControlTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
+        // Cabecera (Se mantiene igual)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Control de Calidad", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -225,6 +238,7 @@ fun QualityControlTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
             }
         }
 
+        // Cards de Totales (Se mantiene igual)
         Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Card(Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))) {
                 Column(Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -245,46 +259,98 @@ fun QualityControlTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
 
         Spacer(Modifier.height(16.dp))
 
-        if (!isEditMode) {
-            Text("Entrada de Nuevo Lote", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Card(Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp)) {
-                LazyColumn(Modifier.padding(12.dp)) {
-                    item {
-                        OutlinedTextField(value = currentOkInput, onValueChange = { if(it.all{c->c.isDigit()}) currentOkInput = it }, label = { Text("Piezas OK lote") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    items(activity.defectos) { defect ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                            Text(defect.name, Modifier.weight(1f), fontSize = 14.sp)
-                            OutlinedTextField(value = currentDefectsInput[defect.name] ?: "", onValueChange = { if(it.all{c->c.isDigit()}) currentDefectsInput[defect.name] = it }, modifier = Modifier.width(80.dp), placeholder = {Text("0")}, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                        }
-                    }
-                }
-            }
-            Button(onClick = {
-                val okCount = currentOkInput.toIntOrNull() ?: 0
-                val defectsToCapture = activity.defectos.map { DefectEntry(it.name, currentDefectsInput[it.name]?.toIntOrNull() ?: 0) }
-                viewModel.addQualityCapture(okCount, defectsToCapture)
-                currentOkInput = ""; activity.defectos.forEach { currentDefectsInput[it.name] = "" }
-            }, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("REGISTRAR Y LIMPIAR") }
-        } else {
-            Text("Ajuste Manual de Totales", fontWeight = FontWeight.Bold, color = Color.Red)
-            Card(Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))) {
-                LazyColumn(Modifier.padding(12.dp)) {
-                    item {
+        // Contenido Principal (Registro o Ajuste)
+        Text(
+            text = if (!isEditMode) "Entrada de Nuevo Lote" else "Ajuste Manual de Totales",
+            fontWeight = FontWeight.Bold,
+            color = if (!isEditMode) MaterialTheme.colorScheme.primary else Color.Red
+        )
+
+        Card(Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = if(isEditMode) Color(0xFFFFF3E0) else MaterialTheme.colorScheme.surfaceVariant)) {
+
+            LazyColumn(Modifier.padding(12.dp)) {
+                item {
+                    if (isEditMode) {
                         Text("⚠️ Estos valores sobrescriben los actuales", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE65100))
                         OutlinedTextField(value = adjustedOkTotal, onValueChange = { adjustedOkTotal = it }, label = { Text("Corregir Total OK") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                        Spacer(Modifier.height(8.dp))
+                    } else {
+                        OutlinedTextField(value = currentOkInput, onValueChange = { if(it.all{c->c.isDigit()}) currentOkInput = it }, label = { Text("Piezas OK lote") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                     }
-                    items(activity.defectos) { defect ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                            Text(defect.name, Modifier.weight(1f))
-                            OutlinedTextField(value = adjustedDefectsMap[defect.name] ?: "0", onValueChange = { adjustedDefectsMap[defect.name] = it }, modifier = Modifier.width(80.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                    Spacer(Modifier.height(12.dp))
+                    Text("Defectos detectados:", style = MaterialTheme.typography.labelMedium)
+                }
+
+                // Lista Dinámica de Defectos (Combina los de la actividad + los nuevos añadidos en el mapa)
+                val allDefectNames = if (isEditMode) adjustedDefectsMap.keys.toList() else currentDefectsInput.keys.toList()
+
+                items(allDefectNames) { defectName ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                        Text(defectName, Modifier.weight(1f), fontSize = 14.sp)
+                        OutlinedTextField(
+                            value = if (isEditMode) (adjustedDefectsMap[defectName] ?: "0") else (currentDefectsInput[defectName] ?: ""),
+                            onValueChange = {
+                                if (it.all { c -> c.isDigit() }) {
+                                    if (isEditMode) adjustedDefectsMap[defectName] = it else currentDefectsInput[defectName] = it
+                                }
+                            },
+                            modifier = Modifier.width(80.dp),
+                            placeholder = { Text("0") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                    }
+                }
+
+                // 🚨 SECCIÓN PARA AÑADIR NUEVO DEFECTO
+                item {
+                    Spacer(Modifier.height(16.dp))
+                    Divider()
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = newDefectName,
+                            onValueChange = { newDefectName = it },
+                            label = { Text("Nuevo tipo de defecto...") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        IconButton(
+                            onClick = {
+                                if (newDefectName.isNotBlank()) {
+                                    // Añadir a ambos mapas para que aparezca en ambos modos
+                                    currentDefectsInput[newDefectName] = ""
+                                    adjustedDefectsMap[newDefectName] = "0"
+                                    newDefectName = ""
+                                }
+                            },
+                            colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.AddCircle, contentDescription = "Añadir")
                         }
                     }
                 }
             }
-            Button(onClick = { showConfirmDialog = true }, modifier = Modifier.fillMaxWidth().height(50.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("CONFIRMAR AJUSTE") }
+        }
+
+        // Botón de Acción Final
+        Button(
+            onClick = {
+                if (isEditMode) {
+                    showConfirmDialog = true
+                } else {
+                    val okCount = currentOkInput.toIntOrNull() ?: 0
+                    val defectsToCapture = currentDefectsInput.map { DefectEntry(it.key, it.value.toIntOrNull() ?: 0) }
+                    viewModel.addQualityCapture(okCount, defectsToCapture)
+
+                    // Limpiar campos
+                    currentOkInput = ""
+                    currentDefectsInput.keys.forEach { currentDefectsInput[it] = "" }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = if (isEditMode) Color.Red else MaterialTheme.colorScheme.primary)
+        ) {
+            Text(if (isEditMode) "CONFIRMAR AJUSTE" else "REGISTRAR Y LIMPIAR")
         }
     }
 }
