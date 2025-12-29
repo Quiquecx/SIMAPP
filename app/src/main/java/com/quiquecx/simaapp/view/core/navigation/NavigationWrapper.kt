@@ -106,6 +106,7 @@ fun NavigationWrapper() {
 
         // 3. SELECCIÓN DE EMPRESA Y HOME
         composable(SimaRoutes.COMPANY_SELECTION) {
+            // Ahora sí reconocerá la función porque el import es correcto
             CompanySelectionScreen(
                 onNavigateToHome = {
                     navController.navigate(SimaRoutes.HOME) {

@@ -1,17 +1,27 @@
 package com.quiquecx.simaapp.view.selectcompany
 
+import com.quiquecx.simaapp.R
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BusinessCenter
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -22,149 +32,143 @@ import com.quiquecx.simaapp.ui.theme.SimaAppTheme
 
 @Composable
 fun CompanySelectionScreen(
-    // 🛑 Eliminamos 'companiesFromLogin' ya que el VM carga los datos
     onNavigateToHome: () -> Unit,
-    // ✅ Usamos el nombre del ViewModel que carga desde la BD
     viewModel: SelectCompanyViewModel = hiltViewModel()
 ) {
-    // ✅ Usamos SelectCompanyUiState
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // 💡 Lógica de navegación: Navega cuando el VM indica que la selección está completa.
+    // Navegación automática al seleccionar
     LaunchedEffect(uiState.selectionComplete) {
         if (uiState.selectionComplete) {
             onNavigateToHome()
         }
     }
 
+    // Llamamos a la UI real
     CompanySelectionContent(
         uiState = uiState,
-        // ✅ Ahora enviamos el objeto CompanyEntity completo a la función de selección
         onCompanySelected = { viewModel.selectCompany(it) }
-        // 🛑 Eliminamos onConfirm, ya que la selección/navegación sucede al hacer clic en la tarjeta
     )
 }
 
+// 2. ESTA ES LA UI PURA
 @Composable
 fun CompanySelectionContent(
-    // ✅ Usamos SelectCompanyUiState
     uiState: SelectCompanyUiState,
-    // ✅ La selección recibe el objeto CompanyEntity
     onCompanySelected: (CompanyEntity) -> Unit
 ) {
-    Scaffold { padding ->
+    Scaffold(
+        containerColor = Color(0xFFF8F9FA)
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFF7F7F7))
                 .padding(padding)
-                .padding(24.dp),
+                .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "SELECCIONA UNA EMPRESA",
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "\"La calidad no es un acto, es un hábito\"",
-                style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray)
-            )
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(48.dp))
 
-            // 🛑 Lógica de estado y error
+            Image(
+                painter = painterResource(id = R.drawable.simalogo), // Sin la extensión .png
+                contentDescription = "Logo SIMA",
+                modifier = Modifier
+                    .size(120.dp) // Ajusté un poco el tamaño para que luzca mejor un logo
+                    .padding(bottom = 8.dp)
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = "Bienvenido a SIMA",
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold)
+            )
+            Text(
+                text = "Selecciona tu centro de trabajo",
+                style = MaterialTheme.typography.bodyMedium.copy(color = Color.Gray)
+            )
+
+            Spacer(Modifier.height(32.dp))
+
             if (uiState.isLoading) {
-                Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Color(0xFFEC221F))
                 }
-            } else if (uiState.errorMessage != null) {
-                Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Text("Error: ${uiState.errorMessage}", color = Color.Red)
-                }
             } else {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxWidth()
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(1),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    // ✅ Iteramos sobre objetos CompanyEntity
                     items(uiState.companies) { company ->
-                        // La selección se compara con el ID
                         val isSelected = uiState.selectedCompany == company.id
-                        CompanyCard(
+                        EnhancedCompanyCard(
                             company = company,
                             isSelected = isSelected,
-                            onClick = { onCompanySelected(company) } // Enviamos el objeto
+                            onClick = { onCompanySelected(company) }
                         )
                     }
                 }
-
-                // Si la selección ocurre al hacer clic en la tarjeta, el botón 'Continuar' no es necesario.
-                // Si lo quieres mantener, se activa si hay una compañía seleccionada.
-                Spacer(Modifier.height(32.dp))
-                uiState.errorMessage?.let { msg ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(text = msg, color = Color.Red)
-                }
             }
-        }
-    }
-}
 
-// --------------------------------------------------------------------------
-// COMPONENTE AUXILIAR (Extraído para claridad y reuso)
-// --------------------------------------------------------------------------
-
-@Composable
-fun CompanyCard(company: CompanyEntity, isSelected: Boolean, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .width(200.dp)
-            .height(160.dp)
-            .shadow(6.dp, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) Color(0xFFEC221F) else Color.White
-        )
-    ) {
-        Box(
-            Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
             Text(
-                text = company.name.uppercase(),
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    color = if (isSelected) Color.White else Color.Black,
-                    fontWeight = FontWeight.Bold
-                )
+                text = "\"La calidad no es un acto, es un hábito\"",
+                style = MaterialTheme.typography.labelMedium.copy(color = Color.LightGray),
+                modifier = Modifier.padding(vertical = 24.dp)
             )
         }
     }
 }
 
-
-// --------------------------------------------------------------------------
-// PREVIEW
-// --------------------------------------------------------------------------
-
-private val mockCompanies = listOf(
-    // ✅ CORRECCIÓN: Agregar el parámetro 'responsible' (o el que falte)
-    CompanyEntity(id = "1", name = "BorgWarner", responsible = "Quique"),
-    CompanyEntity(id = "2", name = "HELLA", responsible = "Quique"),
-    CompanyEntity(id = "3", name = "CHENSON", responsible = "Quique")
-)
-
-@Preview(showBackground = true, showSystemUi = false)
 @Composable
-fun CompanySelectionPreview() {
-    SimaAppTheme {
-        CompanySelectionContent(
-            uiState = SelectCompanyUiState(
-                companies = mockCompanies,
-                isLoading = false,
-                selectedCompany = "2"
-            ),
-            onCompanySelected = {}
-        )
+fun EnhancedCompanyCard(company: CompanyEntity, isSelected: Boolean, onClick: () -> Unit) {
+    val borderColor = if (isSelected) Color(0xFFEC221F) else Color.Transparent
+    val backgroundColor = if (isSelected) Color(0xFFFFF1F0) else Color.White
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(90.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        border = if (isSelected) BorderStroke(2.dp, borderColor) else null,
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 0.dp else 4.dp),
+        colors = CardDefaults.cardColors(containerColor = backgroundColor)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = if (isSelected) Color(0xFFEC221F) else Color(0xFFF1F1F1)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = company.name.take(1).uppercase(),
+                        color = if (isSelected) Color.White else Color.DarkGray,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(company.name, fontWeight = FontWeight.Bold)
+                Text(
+                    "Responsable: ${company.responsible}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            }
+
+            if (isSelected) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFFEC221F))
+            }
+        }
     }
 }

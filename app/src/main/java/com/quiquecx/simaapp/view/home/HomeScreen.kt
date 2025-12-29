@@ -1,10 +1,11 @@
 package com.quiquecx.simaapp.view.home
 
-import android.content.res.Configuration
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import com.quiquecx.simaapp.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -13,14 +14,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ExitToApp // 🚨 NUEVA IMPORTACIÓN PARA LOGOUT
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,173 +25,213 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.quiquecx.simaapp.R
+import com.quiquecx.simaapp.domain.entity.CompanyEntity
 import com.quiquecx.simaapp.domain.entity.ProjectEntity
 import com.quiquecx.simaapp.view.utils.WindowSizeClass
 import com.quiquecx.simaapp.view.utils.rememberWindowSizeClass
+import kotlinx.coroutines.launch
 
-// Componente principal
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     onProjectClick: (String) -> Unit,
-    // 🚨 1. NUEVO: Recibe el callback de deslogeo del NavigationWrapper
-    onSignOut: () -> Unit,
-    // Se elimina onBackClick aquí, ya que el NavigationWrapper lo manejará pasando
-    // el callback de cierre de sesión directamente.
+    onSignOut: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val windowSizeClass = rememberWindowSizeClass()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = Color(0xFFF5F5F5)
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .padding(
-                    horizontal = if (windowSizeClass != WindowSizeClass.Compact) 48.dp else 16.dp,
-                    vertical = 24.dp
-                )
-        ) {
-            // 🚨 2. MODIFICACIÓN: Pasamos el ViewModel y onSignOut a HeaderSection
-            HeaderSection(
-                windowSizeClass = windowSizeClass,
-                viewModel = viewModel,
-                onSignOut = onSignOut
-            )
-
-            Spacer(modifier = Modifier.height(40.dp))
-
-            // LÓGICA DE CARGA Y DISPOSICIÓN ADAPTABLE (Tu lógica existente)
-            if (uiState.isLoading) {
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color(0xFFEC221F))
-                }
-            } else if (uiState.projects.isEmpty() && uiState.errorMessage == null) {
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Text("No hay proyectos activos para ${uiState.selectedCompanyId}", color = Color.Gray)
-                }
-            } else {
-                // Lógica de LazyGrid o LazyRow
-                if (windowSizeClass == WindowSizeClass.Compact) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth().weight(1f)
-                    ) {
-                        items(uiState.projects) { project ->
-                            ProjectCard(project = project, onClick = { onProjectClick(project.id) }, isCompact = true)
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.width(320.dp),
+                drawerContainerColor = Color.White
+            ) {
+                DrawerContent(
+                    companies = uiState.companies,
+                    selectedCompanyId = uiState.selectedCompanyId,
+                    onCompanyClick = { company ->
+                        viewModel.changeCompany(company) {
+                            scope.launch { drawerState.close() }
                         }
+                    },
+                    onClose = { scope.launch { drawerState.close() } }
+                )
+            }
+        }
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color(0xFFF5F5F5)
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+                    .padding(
+                        horizontal = if (windowSizeClass != WindowSizeClass.Compact) 48.dp else 16.dp,
+                        vertical = 24.dp
+                    )
+            ) {
+                HeaderSection(
+                    windowSizeClass = windowSizeClass,
+                    viewModel = viewModel,
+                    onSignOut = onSignOut,
+                    onMenuClick = { scope.launch { drawerState.open() } }
+                )
+
+                Spacer(modifier = Modifier.height(40.dp))
+
+                if (uiState.isLoading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = Color(0xFFEC221F))
+                    }
+                } else if (uiState.projects.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No hay proyectos para esta empresa", color = Color.Gray)
                     }
                 } else {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(32.dp),
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        contentPadding = PaddingValues(horizontal = 16.dp)
-                    ) {
-                        items(uiState.projects) { project ->
-                            ProjectCard(project = project, onClick = { onProjectClick(project.id) }, isCompact = false)
-                        }
-                    }
+                    ProjectsGridOrRow(
+                        uiState = uiState,
+                        windowSizeClass = windowSizeClass,
+                        onProjectClick = onProjectClick
+                    )
                 }
             }
-
-            // 🚨 3. ELIMINACIÓN: El botón "Retroceder" al final de la pantalla ya no es necesario
-            // ya que el cierre de sesión ahora maneja la salida a la pantalla de Login.
-            // Si necesitas un botón "Retroceder" para ir a la pantalla de Selección de Empresa,
-            // ese callback debería venir desde el NavigationWrapper. Por ahora, lo eliminamos
-            // para enfocarnos en el flujo de logout.
         }
     }
 }
 
-/**
- * Sección de encabezado que contiene el menú, el título y el avatar/botón de logout.
- */
+@Composable
+fun DrawerContent(
+    companies: List<CompanyEntity>,
+    selectedCompanyId: String?,
+    onCompanyClick: (CompanyEntity) -> Unit,
+    onClose: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("MIS EMPRESAS", style = MaterialTheme.typography.titleSmall, color = Color.Gray)
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = null)
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(companies) { company ->
+                val isSelected = company.id == selectedCompanyId
+                NavigationDrawerItem(
+                    label = { Text(company.name, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                    selected = isSelected,
+                    onClick = { onCompanyClick(company) },
+                    icon = { Icon(Icons.Default.Business, contentDescription = null) },
+                    colors = NavigationDrawerItemDefaults.colors(
+                        selectedContainerColor = Color(0xFFFFF1F0),
+                        selectedIconColor = Color(0xFFEC221F),
+                        selectedTextColor = Color(0xFFEC221F)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+        Divider(color = Color.LightGray, thickness = 0.5.dp)
+        Text(
+            text = "SIMA App v1.0.2",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(top = 16.dp, start = 8.dp),
+            color = Color.LightGray
+        )
+    }
+}
+
 @Composable
 fun HeaderSection(
     windowSizeClass: WindowSizeClass,
-    // 🚨 NUEVOS PARÁMETROS: ViewModel y Callback para gestionar el Logout
     viewModel: HomeViewModel,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onMenuClick: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        IconButton(onClick = { /* Abrir Drawer */ }) {
-            Icon(Icons.Default.Menu, contentDescription = "Menu", modifier = Modifier.size(32.dp))
+        IconButton(onClick = onMenuClick) {
+            Icon(Icons.Default.Menu, contentDescription = "Menú", modifier = Modifier.size(32.dp))
         }
 
-        Column(
-            modifier = Modifier.weight(1f), // Toma el espacio restante
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "SELECCIONA UN PROYECTO",
-                style = if (windowSizeClass == WindowSizeClass.Compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
-                )
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "\"La mejora continua es mejor que la perfección retrasada\"",
-                style = MaterialTheme.typography.bodyMedium.copy(color = Color.Gray)
-            )
-        }
+        Text(
+            text = "MIS PROYECTOS",
+            style = if (windowSizeClass == WindowSizeClass.Compact)
+                MaterialTheme.typography.titleLarge
+            else
+                MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
+        )
 
-        // 🚨 MODIFICACIÓN: Contenedor del Avatar y botón de Logout
         Box(
             modifier = Modifier
-                .size(if (windowSizeClass == WindowSizeClass.Compact) 48.dp else 58.dp)
-                .clickable { viewModel.signOut(onSignOutSuccess = onSignOut) } // 🚨 Acción de Logout
+                .size(48.dp)
+                .clickable { viewModel.signOut(onSignOutSuccess = onSignOut) }
                 .clip(CircleShape)
-                .background(Color.LightGray)
+                .background(Color.White)
         ) {
-            Image(
-                imageVector = Icons.Default.Person,
-                contentDescription = "User Avatar",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .matchParentSize()
-                    .padding(8.dp) // Relleno dentro del círculo
-            )
-
-            // Ícono de Logout sobrepuesto (pequeño y en rojo, indicando la acción)
+            Icon(Icons.Default.Person, contentDescription = "Logout", modifier = Modifier.align(Alignment.Center))
             Icon(
-                Icons.Filled.ExitToApp,
-                contentDescription = "Cerrar Sesión",
+                Icons.Default.ExitToApp,
+                contentDescription = null,
                 tint = Color(0xFFEC221F),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(if (windowSizeClass == WindowSizeClass.Compact) 18.dp else 22.dp)
-                    .clip(CircleShape)
-                    .background(Color.White)
-                    .padding(2.dp)
+                modifier = Modifier.size(16.dp).align(Alignment.BottomEnd)
             )
         }
     }
 }
 
 @Composable
-fun ProjectCard(project: ProjectEntity, onClick: () -> Unit, isCompact: Boolean) {
-    // ... (Tu código existente de ProjectCard, sin cambios)
-    // ...
-    // Se mantiene ProjectCard sin cambios, ya que solo HeaderSection fue modificado.
+fun ProjectsGridOrRow(
+    uiState: HomeUiState,
+    windowSizeClass: WindowSizeClass,
+    onProjectClick: (String) -> Unit
+) {
+    if (windowSizeClass == WindowSizeClass.Compact) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(uiState.projects) { project ->
+                // Asumo que tienes tu ProjectCard definida
+                ProjectCard(project, onClick = { onProjectClick(project.id) }, isCompact = true)
+            }
+        }
+    } else {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(uiState.projects) { project ->
+                ProjectCard(project, onClick = { onProjectClick(project.id) }, isCompact = false)
+            }
+        }
+    }
+}
 
-    // El tamaño de la tarjeta se adapta: pequeño en móvil, grande en tablet.
+@Composable
+fun ProjectCard(project: ProjectEntity, onClick: () -> Unit, isCompact: Boolean) {
+
     val cardModifier = if (isCompact) {
         Modifier.fillMaxWidth().height(180.dp)
     } else {
@@ -258,91 +294,3 @@ fun ProjectCard(project: ProjectEntity, onClick: () -> Unit, isCompact: Boolean)
     }
 }
 
-
-// ---------------------------------------------------------
-// PREVIEW SECTION (Adaptado para reflejar los cambios en HeaderSection)
-// ---------------------------------------------------------
-
-private val mockProjects = listOf(
-    ProjectEntity(id = "proy_incoming", name = "Incoming", description = "", status = "Activo", responsible = "A", imageType = "incoming"),
-    ProjectEntity(id = "proy_cadenas", name = "Cadenas", description = "", status = "Activo", responsible = "B", imageType = "cadenas"),
-    ProjectEntity(id = "proy_vcts", name = "VCTS", description = "", status = "Activo", responsible = "C", imageType = "vcts"),
-    ProjectEntity(id = "proy_test", name = "Test", description = "", status = "Activo", responsible = "D", imageType = "incoming")
-)
-
-@Preview(
-    name = "1. Tablet/Expanded (Horizontal)",
-    device = "spec:width=1280dp,height=800dp,dpi=480",
-    showBackground = true
-)
-@Composable
-fun PreviewHomeScreenTablet() {
-    com.quiquecx.simaapp.ui.theme.SimaAppTheme {
-        // En el Preview, pasamos una lambda vacía para onSignOut y un mock ViewModel
-        HomeScreenPreviewContent(WindowSizeClass.Expanded, mockProjects, onSignOut = {})
-    }
-}
-
-@Preview(
-    name = "2. Móvil/Compact (Vertical Grid)",
-    device = "spec:width=411dp,height=891dp,dpi=420",
-    showBackground = true
-)
-@Composable
-fun PreviewHomeScreenMobile() {
-    com.quiquecx.simaapp.ui.theme.SimaAppTheme {
-        HomeScreenPreviewContent(WindowSizeClass.Compact, mockProjects, onSignOut = {})
-    }
-}
-
-// Función auxiliar que renderiza el contenido usando el tamaño simulado y el mock ViewModel
-@Composable
-private fun HomeScreenPreviewContent(sizeClass: WindowSizeClass, projects: List<ProjectEntity>, onSignOut: () -> Unit) {
-    // 🚨 Mock del ViewModel para el Preview
-    val mockViewModel = hiltViewModel<HomeViewModel>()
-
-    Scaffold(containerColor = Color(0xFFF5F5F5)) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .padding(
-                    horizontal = if (sizeClass != WindowSizeClass.Compact) 48.dp else 16.dp,
-                    vertical = 24.dp
-                )
-        ) {
-            // Pasamos el mock ViewModel y el onSignOut al HeaderSection del Preview
-            HeaderSection(
-                windowSizeClass = sizeClass,
-                viewModel = mockViewModel,
-                onSignOut = onSignOut
-            )
-            Spacer(modifier = Modifier.height(40.dp))
-
-            // Lógica de LazyGrid/LazyRow (reducida para el preview)
-            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                if (sizeClass == WindowSizeClass.Compact) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        items(projects) { project ->
-                            ProjectCard(project = project, onClick = { }, isCompact = true)
-                        }
-                    }
-                } else {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(32.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp)
-                    ) {
-                        items(projects) { project ->
-                            ProjectCard(project = project, onClick = { }, isCompact = false)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
