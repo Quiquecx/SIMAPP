@@ -50,7 +50,7 @@ fun IncomingDashboardScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("SIMA - Incoming", fontWeight = FontWeight.Bold) },
+                title = { Text("SIMA - Operaciones", fontWeight = FontWeight.Bold) },
                 // 2. Agregamos el icono de navegación hacia atrás
                 navigationIcon = {
                     IconButton(onClick = onBack) {

@@ -14,18 +14,20 @@ import kotlinx.coroutines.launch
 import java.util.Date
 import javax.inject.Inject
 
-// --- ESTADO DE LA UI ACTUALIZADO CON PROJECT ID ---
+// --- ESTADO DE LA UI ---
 data class ActivityUiState(
-    val projectId: String = "", // 🚨 Vital para separar BorgWarner de Hella
+    val projectId: String = "",
     val tipo: String = "",
     val proveedorId: String = "",
     val materialId: String = "",
     val responsable: String = "Equipo Sima",
     val cantidadTotal: String = "",
     val cpmId: String = "",
+
+    // Mantenemos esto si quieres guardar los nombres como una simple nota/string,
+    // pero ya no se mapea a WorkerEntity.
     val personasInput: String = "",
 
-    // Manejo de defectos
     val nombreDefecto1: String = "",
     val cantidadDefecto1: String = "0",
     val nombreDefecto2: String = "",
@@ -36,7 +38,6 @@ data class ActivityUiState(
     val estimadoCosto: String = "0",
     val fechaInicio: Date = Date(),
 
-    // Estados de control
     val isSaving: Boolean = false,
     val saveSuccess: Boolean = false,
     val saveError: Boolean = false
@@ -50,9 +51,6 @@ class ActivityFormViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ActivityUiState())
     val uiState: StateFlow<ActivityUiState> = _uiState.asStateFlow()
 
-    /**
-     * Inicializa el ID del proyecto recibido desde la navegación.
-     */
     fun initProject(projectId: String) {
         _uiState.update { it.copy(projectId = projectId) }
     }
@@ -85,24 +83,15 @@ class ActivityFormViewModel @Inject constructor(
         _uiState.update { it.copy(fechaInicio = newDate) }
     }
 
-    /**
-     * Ejecuta el proceso de guardado enviando la entidad al repositorio.
-     */
     fun saveActivity() {
         val state = _uiState.value
 
-        // Validación básica obligatoria
         if (state.tipo.isBlank() || state.projectId.isBlank() || state.cantidadTotal.toIntOrNull() == null) {
             _uiState.update { it.copy(saveError = true) }
             return
         }
 
-        // 1. Procesar Personas (String separado por comas a Lista)
-        val listaPersonas = state.personasInput.split(",")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-
-        // 2. Procesar Defectos
+        // Procesar Defectos iniciales si existen
         val listaDefectos = mutableListOf<DefectEntry>()
         if (state.nombreDefecto1.isNotBlank()) {
             listaDefectos.add(DefectEntry(state.nombreDefecto1, state.cantidadDefecto1.toIntOrNull() ?: 0))
@@ -113,27 +102,30 @@ class ActivityFormViewModel @Inject constructor(
 
         val totalNoOk = listaDefectos.sumOf { it.count }
 
-        // 3. Crear Entidad con el projectId dinámico
+        // --- CREACIÓN DE ENTIDAD LIMPIA ---
         val newActivity = ActivityEntity(
             id = "",
-            projectId = state.projectId, // 🚨 Asignación clave para el filtrado en Dashboard
+            projectId = state.projectId,
             tipo = state.tipo.trim(),
             proveedorId = state.proveedorId.trim(),
             materialId = state.materialId.trim(),
             responsable = state.responsable.trim(),
             cpmId = state.cpmId.trim(),
-            people = listaPersonas,
+            // Nota: Aquí ya no hay 'workers' ni 'people'.
+            // Si quieres guardar los nombres, puedes concatenarlos en 'defectoNota'.
             defectos = listaDefectos,
-            defectoNota = state.defectoNota,
+            defectoNota = state.defectoNota + (if(state.personasInput.isNotBlank()) "\nEquipo: ${state.personasInput}" else ""),
             cantidadTotal = state.cantidadTotal.toIntOrNull() ?: 0,
             cantidadOk = 0,
             cantidadNoOk = totalNoOk,
             fechaInicio = state.fechaInicio,
             estimadoHoras = state.estimadoHoras,
             estimadoCosto = state.estimadoCosto,
-            estado = "En curso",
+            estado = "Pendiente",
             progreso = 0,
-            timerActive = false // Inicia pausado por defecto
+            timerActive = false,
+            timerStartTime = null,
+            horasAcumuladas = 0.0
         )
 
         _uiState.update { it.copy(isSaving = true, saveError = false) }

@@ -1,15 +1,15 @@
 package com.quiquecx.simaapp.view.dashboard
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.background
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,7 +23,8 @@ import androidx.compose.ui.unit.sp
 import com.quiquecx.simaapp.domain.entity.ActivityEntity
 import com.quiquecx.simaapp.domain.entity.HistoryEntry
 import com.quiquecx.simaapp.domain.entity.DefectEntry
-import kotlinx.coroutines.delay
+import com.quiquecx.simaapp.domain.entity.ProductivityEntity
+import com.quiquecx.simaapp.domain.entity.WorkerEntity
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -32,16 +33,28 @@ import java.util.*
 fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Unit) {
     val activity by viewModel.activity.collectAsState()
     val history by viewModel.history.collectAsState()
+    val productivityLogs by viewModel.productivityLogs.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Detalles", "Calidad", "Tiempo", "Personal", "Historial")
+    val tabs = listOf("General", "Calidad", "Personal", "Historial")
+
+    var showDeleteActivityDialog by remember { mutableStateOf(false) }
+    var logToDelete by remember { mutableStateOf<ProductivityEntity?>(null) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(activity?.cpmId ?: "Detalles") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Regresar") } },
-                actions = { IconButton(onClick = { viewModel.deleteActivity(onBack) }) { Icon(Icons.Default.Delete, "Eliminar", tint = Color.Red) } }
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Regresar")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showDeleteActivityDialog = true }) {
+                        Icon(Icons.Default.Delete, "Eliminar", tint = Color.Red)
+                    }
+                }
             )
         }
     ) { padding ->
@@ -50,366 +63,456 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
         } else {
             activity?.let { act ->
                 Column(Modifier.padding(padding)) {
-                    ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 16.dp) {
+                    TabRow(selectedTabIndex = selectedTab) {
                         tabs.forEachIndexed { index, title ->
                             Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) })
                         }
                     }
                     when (selectedTab) {
                         0 -> GeneralDetailsTab(act, viewModel)
-                        1 -> QualityControlTab(act, viewModel)
-                        2 -> TimerTab(act, viewModel)
-                        3 -> PeopleTab(act, viewModel)
-                        4 -> HistoryTab(history)
+                        1 -> QualityControlTab(act, productivityLogs, viewModel) { logToDelete = it }
+                        2 -> PersonnelTab(act, viewModel)
+                        3 -> HistoryTab(history)
                     }
                 }
             }
         }
     }
+
+    if (showDeleteActivityDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteActivityDialog = false },
+            title = { Text("¿Eliminar actividad?") },
+            text = { Text("Esta acción es permanente y borrará todo el historial. ¿Continuar?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteActivity(onBack)
+                    showDeleteActivityDialog = false
+                }) { Text("ELIMINAR", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteActivityDialog = false }) { Text("CANCELAR") }
+            }
+        )
+    }
+
+    logToDelete?.let { log ->
+        AlertDialog(
+            onDismissRequest = { logToDelete = null },
+            title = { Text("Eliminar registro") },
+            text = { Text("Se restarán ${log.cantidadOk} piezas OK del total. ¿Confirmar?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteProductivityLog(log)
+                    logToDelete = null
+                }) { Text("BORRAR", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { logToDelete = null }) { Text("CANCELAR") }
+            }
+        )
+    }
 }
 
+// --- PESTAÑA: PERSONAL ---
 @Composable
-fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
-    var cpm by remember { mutableStateOf(activity.cpmId) }
-    var total by remember { mutableStateOf(activity.cantidadTotal.toString()) }
-    var horas by remember { mutableStateOf(activity.estimadoHoras) }
-    var nota by remember { mutableStateOf(activity.defectoNota) }
+fun PersonnelTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
+    var newPersonName by remember { mutableStateOf("") }
+    val serverTime by viewModel.currentTime.collectAsState()
 
-    // Usamos fechaInicio que es de tipo Date en tu Entity
-    val sdf = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()) }
+    val totalHoursRunning = activity.workers.sumOf { worker ->
+        val liveSession = if (worker.isTimerActive && worker.startTime != null) {
+            (serverTime - worker.startTime.toDate().time).toDouble() / 3600000.0
+        } else 0.0
+        worker.accumulatedHours + liveSession
+    }
 
-    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-
-        // --- TARJETA INFORMATIVA ---
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
         Card(
-            Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
-            Column(Modifier.padding(16.dp)) {
-                Text("ID Actividad: ${activity.id}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                Spacer(Modifier.height(4.dp))
-
-                // Usamos los IDs de material y proveedor definidos en tu Entity
+            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("TIEMPO TOTAL DE OPERACIÓN", style = MaterialTheme.typography.labelSmall)
                 Text(
-                    text = "Mat: ${activity.materialId} | Prov: ${activity.proveedorId}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    text = "${String.format("%.4f", totalHoursRunning)} hrs",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Black
                 )
-
-                HorizontalDivider(Modifier.padding(vertical = 8.dp), thickness = 0.5.dp)
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text("Responsable", style = MaterialTheme.typography.labelSmall)
-                        Text(activity.responsable, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("Fecha Inicio", style = MaterialTheme.typography.labelSmall)
-                        // Formateamos el campo fechaInicio
-                        Text(sdf.format(activity.fechaInicio), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier.size(8.dp).background(
-                            if(activity.estado == "Finalizado") Color.Gray else Color(0xFF4CAF50),
-                            RoundedCornerShape(50)
-                        )
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Estado: ${activity.estado}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
             }
         }
-
-        // --- FORMULARIO DE EDICIÓN ---
-        Text("Editar Datos del Reporte", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(8.dp))
-
-        OutlinedTextField(value = cpm, onValueChange = { cpm = it }, label = { Text("CPM ID") }, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(8.dp))
-
+        Spacer(Modifier.height(16.dp))
         OutlinedTextField(
-            value = total,
-            onValueChange = { if(it.all { c -> c.isDigit() }) total = it },
-            label = { Text("Total Planificado (Cantidad)") },
+            value = newPersonName,
+            onValueChange = { newPersonName = it },
+            label = { Text("Nombre del Trabajador") },
             modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            trailingIcon = {
+                IconButton(onClick = {
+                    if(newPersonName.isNotBlank()){
+                        viewModel.addPersonToActivity(newPersonName)
+                        newPersonName = ""
+                    }
+                }) { Icon(Icons.Default.Add, null) }
+            }
         )
-        Spacer(Modifier.height(8.dp))
-
-        OutlinedTextField(value = horas, onValueChange = { horas = it }, label = { Text("Est. Horas") }, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = nota,
-            onValueChange = { nota = it },
-            label = { Text("Notas y Observaciones") },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 3
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        Button(
-            onClick = { viewModel.updateGeneralDetails(total.toIntOrNull() ?: 0, horas, "0", nota, cpm) },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Default.Refresh, null)
-            Spacer(Modifier.width(8.dp))
-            Text("Guardar Cambios")
-        }
-
-        if (activity.estado != "Finalizado") {
-            OutlinedButton(
-                onClick = { viewModel.finalizeActivity() },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
-            ) {
-                Icon(Icons.Default.CheckCircle, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Finalizar Actividad")
+        Spacer(Modifier.height(16.dp))
+        Text("Equipo en Planta", fontWeight = FontWeight.Bold)
+        LazyColumn(Modifier.weight(1f)) {
+            items(activity.workers) { worker ->
+                WorkerItemRow(
+                    worker = worker,
+                    serverTime = serverTime,
+                    onToggle = { viewModel.toggleWorkerTimer(worker.name) },
+                    onDelete = { viewModel.removePersonFromActivity(worker) }
+                )
             }
         }
-
-        Spacer(Modifier.height(32.dp))
     }
 }
 
 @Composable
-fun QualityControlTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
+fun WorkerItemRow(worker: WorkerEntity, serverTime: Long, onToggle: () -> Unit, onDelete: () -> Unit) {
+    val cardColor by animateColorAsState(
+        if (worker.isTimerActive) Color(0xFFE8F5E9) else MaterialTheme.colorScheme.surface, label = ""
+    )
+    val liveHours = if (worker.isTimerActive && worker.startTime != null) {
+        val startTimeMillis = worker.startTime.toDate().time
+        maxOf(0.0, (serverTime - startTimeMillis).toDouble() / 3600000.0)
+    } else 0.0
+
+    Card(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        border = if(worker.isTimerActive) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4CAF50)) else null
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(worker.name, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Total: ${String.format("%.4f", worker.accumulatedHours + liveHours)} hrs",
+                    fontSize = 12.sp,
+                    color = if(worker.isTimerActive) Color(0xFF2E7D32) else Color.Gray
+                )
+            }
+            IconButton(onClick = onToggle) {
+                Icon(
+                    imageVector = if (worker.isTimerActive) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
+                    contentDescription = null,
+                    tint = if (worker.isTimerActive) Color.Red else Color(0xFF4CAF50),
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Close, null, tint = Color.LightGray, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+// --- PESTAÑA: CALIDAD ---
+@Composable
+fun QualityControlTab(
+    activity: ActivityEntity,
+    productivityLogs: List<ProductivityEntity>,
+    viewModel: ActivityDetailsViewModel,
+    onDeleteLogRequest: (ProductivityEntity) -> Unit
+) {
     var isEditMode by remember { mutableStateOf(false) }
-    var showConfirmDialog by remember { mutableStateOf(false) }
-
-    // Estado para el nuevo defecto que se quiera añadir
-    var newDefectName by remember { mutableStateOf("") }
-
     var currentOkInput by remember { mutableStateOf("") }
-
-    // Usamos deriveState o keys para que se actualice si la activity cambia
+    var selectedTurno by remember { mutableStateOf("Mañana") }
+    var newDefectName by remember { mutableStateOf("") }
+    val turnos = listOf("Mañana", "Tarde", "Noche")
     val currentDefectsInput = remember(activity.defectos) {
         mutableStateMapOf<String, String>().apply {
             activity.defectos.forEach { put(it.name, "") }
         }
     }
 
-    var adjustedOkTotal by remember { mutableStateOf(activity.cantidadOk.toString()) }
-    val adjustedDefectsMap = remember(activity.defectos) {
-        mutableStateMapOf<String, String>().apply {
-            activity.defectos.forEach { put(it.name, it.count.toString()) }
-        }
-    }
-
-    if (showConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showConfirmDialog = false },
-            title = { Text("¿Confirmar Ajuste Manual?") },
-            text = { Text("Esta acción sobrescribirá los totales actuales. Úselo solo para corregir errores.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val okFixed = adjustedOkTotal.toIntOrNull() ?: 0
-                    // Mapeamos los defectos ajustados
-                    val defectsFixed = adjustedDefectsMap.map { (name, count) ->
-                        DefectEntry(name, count.toIntOrNull() ?: 0)
-                    }
-                    viewModel.adjustQualityTotals(okFixed, defectsFixed)
-                    showConfirmDialog = false
-                    isEditMode = false
-                }) { Text("SÍ, CORREGIR", color = Color.Red) }
-            },
-            dismissButton = { TextButton(onClick = { showConfirmDialog = false }) { Text("CANCELAR") } }
-        )
-    }
-
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        // Cabecera (Se mantiene igual)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Control de Calidad", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+            Text("Control de Producción", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Corrección", style = MaterialTheme.typography.labelSmall)
+                Text("Modo Ajuste", fontSize = 10.sp)
                 Switch(checked = isEditMode, onCheckedChange = { isEditMode = it })
             }
         }
 
-        // Cards de Totales (Se mantiene igual)
-        Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!isEditMode) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                turnos.forEach { turno ->
+                    FilterChip(
+                        selected = selectedTurno == turno,
+                        onClick = { selectedTurno = turno },
+                        label = { Text(turno) }
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Card(Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))) {
-                Column(Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("TOTAL OK", fontSize = 10.sp, color = Color(0xFF2E7D32))
-                    Text("${activity.cantidadOk}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Column(Modifier.padding(8.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("OK ACUMULADO", fontSize = 10.sp)
+                    Text("${activity.cantidadOk}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
             }
             Card(Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))) {
-                Column(Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("TOTAL NO OK", fontSize = 10.sp, color = Color.Red)
-                    Text("${activity.cantidadNoOk}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Color.Red)
+                Column(Modifier.padding(8.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("NO OK TOTAL", fontSize = 10.sp)
+                    Text("${activity.cantidadNoOk}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.Red)
                 }
             }
         }
 
-        val animatedProgress by animateFloatAsState(targetValue = activity.progreso / 100f, label = "")
-        LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth().height(8.dp), color = Color(0xFF4CAF50), strokeCap = androidx.compose.ui.graphics.StrokeCap.Round)
+        LazyColumn(Modifier.weight(1f)) {
+            item {
+                OutlinedTextField(
+                    value = currentOkInput,
+                    onValueChange = { if(it.all{c->c.isDigit()}) currentOkInput = it },
+                    label = { Text(if(isEditMode) "Corregir Total OK" else "Piezas OK del Lote") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("Desglose de Defectos:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+            }
 
-        Spacer(Modifier.height(16.dp))
-
-        // Contenido Principal (Registro o Ajuste)
-        Text(
-            text = if (!isEditMode) "Entrada de Nuevo Lote" else "Ajuste Manual de Totales",
-            fontWeight = FontWeight.Bold,
-            color = if (!isEditMode) MaterialTheme.colorScheme.primary else Color.Red
-        )
-
-        Card(Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = if(isEditMode) Color(0xFFFFF3E0) else MaterialTheme.colorScheme.surfaceVariant)) {
-
-            LazyColumn(Modifier.padding(12.dp)) {
-                item {
-                    if (isEditMode) {
-                        Text("⚠️ Estos valores sobrescriben los actuales", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE65100))
-                        OutlinedTextField(value = adjustedOkTotal, onValueChange = { adjustedOkTotal = it }, label = { Text("Corregir Total OK") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                    } else {
-                        OutlinedTextField(value = currentOkInput, onValueChange = { if(it.all{c->c.isDigit()}) currentOkInput = it }, label = { Text("Piezas OK lote") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            items(activity.defectos) { defect ->
+                Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { viewModel.removeDefectType(defect) }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.RemoveCircleOutline, null, tint = Color.LightGray)
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Text("Defectos detectados:", style = MaterialTheme.typography.labelMedium)
-                }
-
-                // Lista Dinámica de Defectos (Combina los de la actividad + los nuevos añadidos en el mapa)
-                val allDefectNames = if (isEditMode) adjustedDefectsMap.keys.toList() else currentDefectsInput.keys.toList()
-
-                items(allDefectNames) { defectName ->
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(defectName, Modifier.weight(1f), fontSize = 14.sp)
-                        OutlinedTextField(
-                            value = if (isEditMode) (adjustedDefectsMap[defectName] ?: "0") else (currentDefectsInput[defectName] ?: ""),
-                            onValueChange = {
-                                if (it.all { c -> c.isDigit() }) {
-                                    if (isEditMode) adjustedDefectsMap[defectName] = it else currentDefectsInput[defectName] = it
-                                }
-                            },
-                            modifier = Modifier.width(80.dp),
-                            placeholder = { Text("0") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                        )
+                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                        Text(defect.name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text("Acumulado: ${defect.count}", fontSize = 11.sp, color = Color.Gray)
                     }
+                    OutlinedTextField(
+                        value = currentDefectsInput[defect.name] ?: "",
+                        onValueChange = { if(it.all{c->c.isDigit()}) currentDefectsInput[defect.name] = it },
+                        modifier = Modifier.width(90.dp),
+                        placeholder = { Text("0") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
                 }
+            }
 
-                // 🚨 SECCIÓN PARA AÑADIR NUEVO DEFECTO
-                item {
-                    Spacer(Modifier.height(16.dp))
-                    Divider()
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = newDefectName,
-                            onValueChange = { newDefectName = it },
-                            label = { Text("Nuevo tipo de defecto...") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        IconButton(
-                            onClick = {
-                                if (newDefectName.isNotBlank()) {
-                                    // Añadir a ambos mapas para que aparezca en ambos modos
-                                    currentDefectsInput[newDefectName] = ""
-                                    adjustedDefectsMap[newDefectName] = "0"
-                                    newDefectName = ""
-                                }
-                            },
-                            colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                        ) {
-                            Icon(Icons.Default.AddCircle, contentDescription = "Añadir")
+            item {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newDefectName,
+                        onValueChange = { newDefectName = it },
+                        label = { Text("Nuevo tipo de defecto...") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    IconButton(onClick = {
+                        if (newDefectName.isNotBlank()) {
+                            viewModel.addNewDefectType(newDefectName)
+                            newDefectName = ""
                         }
-                    }
+                    }) { Icon(Icons.Default.AddCircle, null, tint = MaterialTheme.colorScheme.primary) }
                 }
+                Spacer(Modifier.height(24.dp))
+                Text("HISTORIAL DE TURNOS", fontWeight = FontWeight.Black, fontSize = 12.sp, color = Color.Gray)
+                Spacer(Modifier.height(8.dp))
             }
+            items(productivityLogs) { log -> ProductivityLogItem(log, onDelete = { onDeleteLogRequest(log) }) }
         }
 
-        // Botón de Acción Final
         Button(
             onClick = {
+                val defects = currentDefectsInput.map { DefectEntry(it.key, it.value.toIntOrNull() ?: 0) }
                 if (isEditMode) {
-                    showConfirmDialog = true
+                    viewModel.adjustQualityTotals(currentOkInput.toIntOrNull() ?: activity.cantidadOk, defects)
                 } else {
-                    val okCount = currentOkInput.toIntOrNull() ?: 0
-                    val defectsToCapture = currentDefectsInput.map { DefectEntry(it.key, it.value.toIntOrNull() ?: 0) }
-                    viewModel.addQualityCapture(okCount, defectsToCapture)
-
-                    // Limpiar campos
+                    viewModel.addQualityCaptureWithShift(currentOkInput.toIntOrNull() ?: 0, defects, selectedTurno)
                     currentOkInput = ""
                     currentDefectsInput.keys.forEach { currentDefectsInput[it] = "" }
                 }
             },
-            modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = if (isEditMode) Color.Red else MaterialTheme.colorScheme.primary)
+            modifier = Modifier.fillMaxWidth().height(56.dp).padding(top = 8.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = if(isEditMode) Color.Red else MaterialTheme.colorScheme.primary)
         ) {
-            Text(if (isEditMode) "CONFIRMAR AJUSTE" else "REGISTRAR Y LIMPIAR")
+            Text(if(isEditMode) "GUARDAR AJUSTE MANUAL" else "REGISTRAR LOTE - $selectedTurno")
         }
     }
 }
 
+// --- PESTAÑA: GENERAL ---
 @Composable
-fun TimerTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
-    var secondsElapsed by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(activity.timerActive, activity.timerStartTime) {
-        if (activity.timerActive && activity.timerStartTime != null) {
-            while (true) {
-                secondsElapsed = maxOf(0L, System.currentTimeMillis() - activity.timerStartTime.time) / 1000
-                delay(1000L)
-            }
-        } else secondsElapsed = 0L
+fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
+    var cpm by remember(activity.id) { mutableStateOf(activity.cpmId) }
+    var total by remember(activity.id) { mutableStateOf(activity.cantidadTotal.toString()) }
+    var nota by remember(activity.id) { mutableStateOf(activity.defectoNota) }
+    var horasEst by remember(activity.id) { mutableStateOf(activity.estimadoHoras) }
+
+    val serverTime by viewModel.currentTime.collectAsState()
+
+    // 1. TIEMPO REAL: Suma total de los cronómetros de todo el personal (Acumulado + En vivo)
+    val totalHoursReal = activity.workers.sumOf { worker ->
+        val liveSession = if (worker.isTimerActive && worker.startTime != null) {
+            (serverTime - worker.startTime.toDate().time).toDouble() / 3600000.0
+        } else 0.0
+        worker.accumulatedHours + liveSession
     }
-    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(if (activity.timerActive) "ACTIVO" else "PAUSADO", fontWeight = FontWeight.Bold, color = if (activity.timerActive) Color(0xFF4CAF50) else Color.Gray)
-        Text(String.format("%02d:%02d:%02d", secondsElapsed / 3600, (secondsElapsed % 3600) / 60, secondsElapsed % 60), style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Black)
-        Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            if (!activity.timerActive) {
-                Button(onClick = { viewModel.startTimerAndSetInProgress() }, modifier = Modifier.weight(1f).height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))) { Text("INICIAR") }
-            } else {
-                Button(onClick = { viewModel.pauseTimerAndSave() }, modifier = Modifier.weight(1f).height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))) { Text("PAUSAR") }
+
+    // 2. TIEMPO TEÓRICO: Es el valor directo que el supervisor escribe en "Horas Est."
+    val horasTeoricasPlanificadas = horasEst.replace(",", ".").toDoubleOrNull() ?: 0.0
+
+    // 3. BALANCE: Comparación directa entre lo planificado y lo consumido
+    // Si el balance es positivo, aún queda tiempo del presupuesto.
+    // Si es negativo, ya se excedieron las horas estimadas.
+    val balance = horasTeoricasPlanificadas - totalHoursReal
+
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("Rendimiento Operativo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+
+        Card(
+            Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (balance >= 0) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+            )
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                    Column {
+                        Text("TIEMPO REAL (PERSONAL)", style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            "${String.format("%.2f", totalHoursReal)}h",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("TIEMPO ESTIMADO", style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            "${String.format("%.2f", horasTeoricasPlanificadas)}h",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
+                }
+                HorizontalDivider(Modifier.padding(vertical = 12.dp), thickness = 0.5.dp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (balance >= 0) Icons.Default.CheckCircle else Icons.Default.Warning,
+                        null,
+                        tint = if (balance >= 0) Color(0xFF2E7D32) else Color.Red
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (balance >= 0) "Restante: ${String.format("%.2f", balance)}h"
+                        else "Excedido: ${String.format("%.2f", Math.abs(balance))}h",
+                        fontWeight = FontWeight.Bold,
+                        color = if (balance >= 0) Color(0xFF2E7D32) else Color.Red
+                    )
+                }
             }
         }
-        Spacer(Modifier.height(32.dp))
-        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Total Acumulado")
-                Text("${String.format("%.4f", activity.horasAcumuladas)} hrs", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+
+        // Información de la Actividad
+        Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Responsable: ${activity.responsable}")
+                Text("Estado: ${activity.estado}", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(12.dp))
+
+                val totalLoteNum = total.toIntOrNull() ?: 0
+                val procesadasActual = (activity.cantidadOk + activity.cantidadNoOk).toDouble()
+                val progreso = if (totalLoteNum > 0) ((procesadasActual / totalLoteNum) * 100).toInt().coerceIn(0, 100) else 0
+
+                LinearProgressIndicator(
+                    progress = { progreso / 100f },
+                    modifier = Modifier.fillMaxWidth().height(8.dp),
+                    strokeCap = StrokeCap.Round
+                )
+                Text("Progreso de Producción: $progreso%", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
+        }
+
+        // Apartado de edición para el Supervisor
+        OutlinedTextField(value = cpm, onValueChange = { cpm = it }, label = { Text("CPM ID") }, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = total,
+                onValueChange = { if(it.all { c -> c.isDigit() }) total = it },
+                label = { Text("Lote Total") },
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            OutlinedTextField(
+                value = horasEst,
+                onValueChange = { horasEst = it },
+                label = { Text("Tiempo Estimado (h)") },
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = nota, onValueChange = { nota = it }, label = { Text("Notas") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+
+        Button(
+            onClick = {
+                viewModel.updateGeneralDetails(
+                    cantidadTotal = total.toIntOrNull() ?: 0,
+                    estHoras = horasEst,
+                    estCosto = "0",
+                    nota = nota,
+                    cpm = cpm
+                )
+            },
+            modifier = Modifier.fillMaxWidth().height(56.dp).padding(top = 16.dp)
+        ) {
+            Icon(Icons.Default.Save, null)
+            Spacer(Modifier.width(8.dp))
+            Text("ACTUALIZAR PLAN")
         }
     }
 }
 
-@Composable
-fun PeopleTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
-    var newPerson by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        OutlinedTextField(value = newPerson, onValueChange = { newPerson = it }, label = { Text("Añadir Personal") }, modifier = Modifier.fillMaxWidth(), trailingIcon = { IconButton(onClick = { if(newPerson.isNotBlank()){ viewModel.addPersonToActivity(newPerson); newPerson = "" } }) { Icon(Icons.Default.Add, null) } })
-        LazyColumn { items(activity.people) { person -> ListItem(headlineContent = { Text(person) }, trailingContent = { IconButton(onClick = { viewModel.removePersonFromActivity(person) }) { Icon(Icons.Default.Delete, null, tint = Color.Gray) } }) } }
-    }
-}
-
+// --- PESTAÑA: HISTORIAL ---
 @Composable
 fun HistoryTab(history: List<HistoryEntry>) {
-    val sdf = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault())
-    LazyColumn(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val sdf = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
+    LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
         items(history) { entry ->
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Column(Modifier.padding(12.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(entry.userName, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                        Text(entry.userName, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         Text(sdf.format(entry.timestamp.toDate()), fontSize = 10.sp, color = Color.Gray)
                     }
                     Text("${entry.field}: ${entry.oldValue} -> ${entry.newValue}", fontSize = 12.sp)
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun ProductivityLogItem(log: ProductivityEntity, onDelete: () -> Unit) {
+    val sdf = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Badge { Text(log.turno) }
+                Text(sdf.format(log.timestamp.toDate()), fontSize = 11.sp, color = Color.Gray)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("${log.cantidadOk} OK", fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                Text("${log.defectos.sumOf { it.count }} DEF", fontSize = 11.sp, color = Color.Red)
+            }
+            IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, null, tint = Color.Gray, modifier = Modifier.size(20.dp)) }
         }
     }
 }

@@ -7,16 +7,20 @@ import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FieldValue
-import com.quiquecx.simaapp.domain.entity.ActivityEntity
-import com.quiquecx.simaapp.domain.entity.HistoryEntry
-import com.quiquecx.simaapp.domain.entity.DefectEntry
+import com.google.firebase.firestore.Query
+import com.quiquecx.simaapp.data.model.ActivityDto
+import com.quiquecx.simaapp.data.model.WorkerDto
+import com.quiquecx.simaapp.domain.entity.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.net.URLDecoder
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
@@ -35,11 +39,16 @@ class ActivityDetailsViewModel @Inject constructor(
     private val _activity = MutableStateFlow<ActivityEntity?>(null)
     val activity: StateFlow<ActivityEntity?> = _activity.asStateFlow()
 
+    private val _currentTime = MutableStateFlow(System.currentTimeMillis())
+    val currentTime: StateFlow<Long> = _currentTime.asStateFlow()
+
     private val _history = MutableStateFlow<List<HistoryEntry>>(emptyList())
     val history: StateFlow<List<HistoryEntry>> = _history.asStateFlow()
 
+    private val _productivityLogs = MutableStateFlow<List<ProductivityEntity>>(emptyList())
+    val productivityLogs: StateFlow<List<ProductivityEntity>> = _productivityLogs.asStateFlow()
+
     private val currentUser get() = auth.currentUser
-    private val currentUserId get() = currentUser?.uid ?: "unknown"
     private val currentUserName get() = currentUser?.email ?: "Desconocido"
 
     private val activityId: String? = savedStateHandle.get<String>("activityId")?.let {
@@ -47,9 +56,20 @@ class ActivityDetailsViewModel @Inject constructor(
     }
 
     init {
-        activityId?.let {
-            fetchActivityDetailsStream(it)
-            fetchActivityHistory(it)
+        activityId?.let { id ->
+            fetchActivityDetailsStream(id)
+            fetchActivityHistory(id)
+            fetchProductivityLogs(id)
+            startClockTicker()
+        }
+    }
+
+    private fun startClockTicker() {
+        viewModelScope.launch {
+            while (true) {
+                _currentTime.value = System.currentTimeMillis()
+                delay(1000)
+            }
         }
     }
 
@@ -62,55 +82,80 @@ class ActivityDetailsViewModel @Inject constructor(
                     return@addSnapshotListener
                 }
                 if (snapshot != null && snapshot.exists()) {
-                    val activityObj = snapshot.toObject(ActivityEntity::class.java)
-                    _activity.value = activityObj?.copy(id = snapshot.id)
+                    try {
+                        val dto = snapshot.toObject(ActivityDto::class.java)
+                        _activity.value = dto?.toEntity()?.copy(id = snapshot.id)
+                    } catch (mapError: Exception) {
+                        _error.value = "Error de mapeo: ${mapError.message}"
+                    }
                 }
                 _isLoading.value = false
             }
     }
 
-    private fun fetchActivityHistory(activityId: String) {
-        firestore.collection("activities").document(activityId).collection("history")
-            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, _ ->
-                _history.value = snapshot?.documents?.mapNotNull { it.toObject(HistoryEntry::class.java) } ?: emptyList()
-            }
+    // --- GESTIÓN DE PERSONAL (WORKERS) ---
+
+    fun addPersonToActivity(name: String) {
+        val id = activityId ?: return
+        val newWorker = WorkerDto(name = name, isTimerActive = false)
+        firestore.collection("activities").document(id)
+            .update("workers", FieldValue.arrayUnion(newWorker))
     }
 
-    // --- LÓGICA DE CRONÓMETRO (RELOJ LOCAL) ---
-
-    fun startTimerAndSetInProgress() {
+    fun removePersonFromActivity(worker: WorkerEntity) {
         val id = activityId ?: return
-        val current = _activity.value ?: return
-        if (current.timerActive) return
-        val updates = mutableMapOf<String, Any>("timerActive" to true, "timerStartTime" to Date())
-        if (current.estado != "En curso") updates["estado"] = "En curso"
-        updateFirestoreFields(updates)
-        logActivityChange(id, "Cronómetro", "Estado", "Iniciado")
+        firestore.collection("activities").document(id)
+            .update("workers", FieldValue.arrayRemove(WorkerDto.fromEntity(worker)))
     }
 
-    fun pauseTimerAndSave() {
+    fun toggleWorkerTimer(workerName: String) {
         val id = activityId ?: return
-        val current = _activity.value ?: return
-        val startTime = current.timerStartTime ?: return
-        val now = Date()
-        val diffInMs = maxOf(0L, now.time - startTime.time)
-        val sessionHours = diffInMs.toDouble() / 3600000.0
-        val newTotalHours = current.horasAcumuladas + sessionHours
-        val updates = mapOf(
-            "timerActive" to false,
-            "timerStartTime" to FieldValue.delete(),
-            "horasAcumuladas" to newTotalHours
-        )
-        updateFirestoreFields(updates)
-        logActivityChange(id, "Cronómetro", "Pausado", "Sesión: ${String.format("%.4f", sessionHours)} hrs")
+        val currentAct = _activity.value ?: return
+        val worker = currentAct.workers.find { it.name == workerName } ?: return
+        val now = Timestamp.now()
+
+        val updatedWorkers = currentAct.workers.map { w ->
+            if (w.name == workerName) {
+                if (!w.isTimerActive) {
+                    w.copy(isTimerActive = true, startTime = now)
+                } else {
+                    val startMs = w.startTime?.toDate()?.time ?: now.toDate().time
+                    val diffHours = (now.toDate().time - startMs).toDouble() / 3600000.0
+                    w.copy(isTimerActive = false, startTime = null, accumulatedHours = w.accumulatedHours + diffHours)
+                }
+            } else w
+        }.map { WorkerDto.fromEntity(it) } // Convertimos de nuevo a DTO para Firestore
+
+        firestore.collection("activities").document(id).update("workers", updatedWorkers)
     }
 
-    // --- CONTROL DE CALIDAD ACUMULATIVO ---
+    // --- CALIDAD Y PRODUCCIÓN ---
 
-    fun addQualityCapture(newOkCount: Int, captureDefects: List<DefectEntry>) {
+    fun toggleMainTimer() {
+        val current = _activity.value ?: return
+        val now = Timestamp.now()
+        val updates = mutableMapOf<String, Any?>()
+
+        if (!current.timerActive) {
+            updates["timerActive"] = true
+            updates["timerStartTime"] = now
+            updates["estado"] = "En curso"
+        } else {
+            val startMs = current.timerStartTime?.time ?: now.toDate().time
+            val diffMs = maxOf(0L, now.toDate().time - startMs)
+            val sessionHours = diffMs.toDouble() / 3600000.0
+
+            updates["timerActive"] = false
+            updates["timerStartTime"] = null
+            updates["horasAcumuladas"] = current.horasAcumuladas + sessionHours
+        }
+        updateFirestoreFields(updates.filterValues { it != null } as Map<String, Any>)
+    }
+
+    fun addQualityCaptureWithShift(newOkCount: Int, captureDefects: List<DefectEntry>, turno: String) {
         val id = activityId ?: return
         val current = _activity.value ?: return
+
         val totalOkAcumulado = current.cantidadOk + newOkCount
         val listaDefectosActualizada = current.defectos.toMutableList()
 
@@ -127,96 +172,124 @@ class ActivityDetailsViewModel @Inject constructor(
         }
 
         val totalNoOkAcumulado = listaDefectosActualizada.sumOf { it.count }
-        val progress = if (current.cantidadTotal > 0) {
-            ((totalOkAcumulado.toDouble() / current.cantidadTotal.toDouble()) * 100).toInt().coerceIn(0, 100)
-        } else 0
+        val progress = calculateProgress(totalOkAcumulado, totalNoOkAcumulado, current.cantidadTotal)
 
-        updateFirestoreFields(mapOf(
-            "cantidadOk" to totalOkAcumulado,
-            "defectos" to listaDefectosActualizada,
-            "cantidadNoOk" to totalNoOkAcumulado,
-            "progreso" to progress
-        ))
-        logActivityChange(id, "Calidad", "Captura Lote", "Añadido OK: $newOkCount")
+        val log = mapOf(
+            "timestamp" to Timestamp.now(),
+            "dia" to SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+            "turno" to turno,
+            "cantidadOk" to newOkCount,
+            "defectos" to captureDefects.filter { it.count > 0 },
+            "registradoPor" to currentUserName
+        )
+
+        viewModelScope.launch {
+            firestore.collection("activities").document(id).collection("productivity_logs").add(log)
+            updateFirestoreFields(mapOf(
+                "cantidadOk" to totalOkAcumulado,
+                "defectos" to listaDefectosActualizada,
+                "cantidadNoOk" to totalNoOkAcumulado,
+                "progreso" to progress
+            ))
+        }
     }
 
-    // --- CORRECCIÓN DE ERRORES (SOBREESCRIBIR) ---
-
-    fun adjustQualityTotals(newOkTotal: Int, adjustedDefects: List<DefectEntry>) {
+    fun deleteProductivityLog(log: ProductivityEntity) {
         val id = activityId ?: return
-        val current = _activity.value ?: return
-        val newTotalNoOk = adjustedDefects.sumOf { it.count }
-        val progress = if (current.cantidadTotal > 0) {
-            ((newOkTotal.toDouble() / current.cantidadTotal.toDouble()) * 100).toInt().coerceIn(0, 100)
-        } else 0
+        viewModelScope.launch {
+            try {
+                firestore.collection("activities").document(id)
+                    .collection("productivity_logs").document(log.id).delete()
+            } catch (e: Exception) {
+                _error.value = "Error al eliminar log: ${e.message}"
+            }
+        }
+    }
+
+    fun adjustQualityTotals(newOkTotal: Int, defects: List<DefectEntry>) {
+        val totalNoOk = defects.sumOf { it.count }
+        val currentTotal = _activity.value?.cantidadTotal ?: 0
+        val progress = calculateProgress(newOkTotal, totalNoOk, currentTotal)
 
         updateFirestoreFields(mapOf(
             "cantidadOk" to newOkTotal,
-            "defectos" to adjustedDefects,
-            "cantidadNoOk" to newTotalNoOk,
+            "defectos" to defects,
+            "cantidadNoOk" to totalNoOk,
             "progreso" to progress
         ))
-        logActivityChange(id, "Calidad", "AJUSTE MANUAL", "Corrección de totales")
     }
 
-    // --- OTRAS FUNCIONES ---
-
-    fun addPersonToActivity(name: String) {
-        val id = activityId ?: return
-        viewModelScope.launch {
-            try { firestore.collection("activities").document(id).update("people", FieldValue.arrayUnion(name))
-                logActivityChange(id, "Personal", "Agregado", name)
-            } catch (e: Exception) { _error.value = e.message }
-        }
-    }
-
-    fun removePersonFromActivity(name: String) {
-        val id = activityId ?: return
-        viewModelScope.launch {
-            try { firestore.collection("activities").document(id).update("people", FieldValue.arrayRemove(name))
-                logActivityChange(id, "Personal", "Removido", name)
-            } catch (e: Exception) { _error.value = e.message }
-        }
-    }
+    // --- GENERAL ---
 
     fun updateGeneralDetails(cantidadTotal: Int, estHoras: String, estCosto: String, nota: String, cpm: String) {
-        updateFirestoreFields(mapOf("cantidadTotal" to cantidadTotal, "estimadoHoras" to estHoras, "estimadoCosto" to estCosto, "defectoNota" to nota, "cpmId" to cpm))
-        logActivityChange(activityId ?: "", "Detalles", "Edición", "Info general")
+        val current = _activity.value
+        val progress = calculateProgress(current?.cantidadOk ?: 0, current?.cantidadNoOk ?: 0, cantidadTotal)
+
+        val updates = mapOf(
+            "cantidadTotal" to cantidadTotal,
+            "estimadoHoras" to estHoras,
+            "estimadoCosto" to estCosto,
+            "defectoNota" to nota,
+            "cpmId" to cpm,
+            "progreso" to progress
+        )
+        updateFirestoreFields(updates)
     }
 
     fun finalizeActivity() {
         val id = activityId ?: return
-        if (_activity.value?.timerActive == true) pauseTimerAndSave()
-        updateFirestoreFields(mapOf("estado" to "Finalizado", "timerActive" to false, "progreso" to 100))
-        logActivityChange(id, "Estado", "Cambio", "Finalizado")
-    }
-
-    private fun updateFirestoreFields(updates: Map<String, Any>) {
-        val id = activityId ?: return
-        viewModelScope.launch {
-            try { firestore.collection("activities").document(id).update(updates) }
-            catch (e: Exception) { _error.value = e.message }
-        }
-    }
-
-    private fun logActivityChange(id: String, field: String, old: Any?, new: Any?) {
-        if (id.isBlank()) return
-        val logEntry = HistoryEntry(Timestamp.now(), currentUserId, currentUserName, field, old?.toString() ?: "N/A", new?.toString() ?: "N/A")
-        firestore.collection("activities").document(id).collection("history").add(logEntry)
-    }
-
-    fun deleteActivity(onBack: () -> Unit) {
-        activityId?.let { id -> firestore.collection("activities").document(id).delete().addOnSuccessListener { onBack() } }
+        firestore.collection("activities").document(id).update("estado", "Finalizado")
     }
 
     fun addNewDefectType(name: String) {
         val id = activityId ?: return
         val current = _activity.value ?: return
         if (current.defectos.any { it.name.equals(name, ignoreCase = true) }) return
+        val newDefect = DefectEntry(name = name, count = 0)
+        firestore.collection("activities").document(id).update("defectos", FieldValue.arrayUnion(newDefect))
+    }
+
+    fun removeDefectType(defect: DefectEntry) {
+        val id = activityId ?: return
+        firestore.collection("activities").document(id).update("defectos", FieldValue.arrayRemove(defect))
+    }
+
+    private fun calculateProgress(ok: Int, noOk: Int, total: Int): Int {
+        if (total <= 0) return 0
+        return (((ok + noOk).toDouble() / total.toDouble()) * 100).toInt().coerceIn(0, 100)
+    }
+
+    private fun updateFirestoreFields(updates: Map<String, Any>) {
+        val id = activityId ?: return
         viewModelScope.launch {
-            try { firestore.collection("activities").document(id).update("defectos", FieldValue.arrayUnion(DefectEntry(name, 0)))
-                logActivityChange(id, "Estructura", "Nuevo defecto", name)
+            try {
+                firestore.collection("activities").document(id).update(updates)
             } catch (e: Exception) { _error.value = e.message }
         }
+    }
+
+    fun deleteActivity(onBack: () -> Unit) {
+        activityId?.let { id ->
+            firestore.collection("activities").document(id).delete().addOnSuccessListener { onBack() }
+        }
+    }
+
+    private fun fetchActivityHistory(activityId: String) {
+        firestore.collection("activities").document(activityId).collection("history")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, _ ->
+                _history.value = snapshot?.documents?.mapNotNull { it.toObject(HistoryEntry::class.java) } ?: emptyList()
+            }
+    }
+
+    private fun fetchProductivityLogs(activityId: String) {
+        firestore.collection("activities").document(activityId).collection("productivity_logs")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, _ ->
+                _productivityLogs.value = snapshot?.documents?.mapNotNull { doc ->
+                    val entity = doc.toObject(ProductivityEntity::class.java)
+                    entity?.copy(id = doc.id)
+                } ?: emptyList()
+            }
     }
 }

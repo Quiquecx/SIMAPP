@@ -3,7 +3,6 @@ package com.quiquecx.simaapp.data.repository
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.dataObjects
-import com.google.firebase.firestore.toObject
 import com.quiquecx.simaapp.data.model.ActivityDto
 import com.quiquecx.simaapp.domain.entity.ActivityEntity
 import com.quiquecx.simaapp.domain.repository.DashboardRepository
@@ -16,54 +15,62 @@ class DashboardRepositoryImpl @Inject constructor(
     private val firestore: FirebaseFirestore
 ) : DashboardRepository {
 
-    // Nombre de la colección en Firestore (debe coincidir)
     private val activitiesCollection = firestore.collection("activities")
 
-    // 1. READ STREAM (Lectura en tiempo real)
     override fun getActivitiesStream(projectId: String): Flow<List<ActivityEntity>> {
-
         return activitiesCollection
             .whereEqualTo("projectId", projectId)
             .orderBy("fechaInicio", Query.Direction.DESCENDING)
-            .dataObjects<ActivityDto>() // Mapea el stream a ActivityDto
+            .dataObjects<ActivityDto>()
             .map { dtos ->
-                dtos.mapNotNull { it.toEntity() } // Mapea de DTO a Entity, ignorando nulos
+                // Filtramos nulos por seguridad y convertimos a Entity
+                dtos.filterNotNull().map { it.toEntity() }
             }
     }
 
-    // 2. READ (Detalles de una actividad específica)
     override suspend fun getActivityDetails(activityId: String): ActivityEntity? {
         return try {
             val snapshot = activitiesCollection.document(activityId).get().await()
-            snapshot.toObject<ActivityDto>()?.toEntity()
+            // Importante: al convertir a objeto, el @DocumentId del DTO se llena automáticamente
+            snapshot.toObject(ActivityDto::class.java)?.toEntity()
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("REPO_ERROR", "Error obteniendo detalles: ${e.message}")
             null
         }
     }
 
-    // 3. CREATE / UPDATE (Firestore lo maneja con set)
     override suspend fun saveActivity(activity: ActivityEntity): Result<Unit> {
         return try {
+            // 1. Convertimos la entidad a DTO
             val dto = ActivityDto.fromEntity(activity)
-            // Si activity.id está vacío, Firestore genera un nuevo documento ID
-            activitiesCollection.document(activity.id.ifEmpty { firestore.collection("activities").document().id })
-                .set(dto)
-                .await()
+
+            // 2. Determinamos la referencia del documento
+            val docRef = if (activity.id.isBlank()) {
+                activitiesCollection.document()
+            } else {
+                activitiesCollection.document(activity.id)
+            }
+
+            // 3. Guardamos.
+            // NOTA: Firebase ignorará el campo marcado con @DocumentId en el DTO
+            // al hacer el set(), lo cual es correcto para no duplicar el ID.
+            docRef.set(dto).await()
             Result.success(Unit)
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("REPO_ERROR", "Error al guardar: ${e.message}")
             Result.failure(e)
         }
     }
 
-    // 4. DELETE
     override suspend fun deleteActivity(activityId: String): Result<Unit> {
         return try {
-            activitiesCollection.document(activityId).delete().await()
-            Result.success(Unit)
+            if (activityId.isNotBlank()) {
+                activitiesCollection.document(activityId).delete().await()
+                Result.success(Unit)
+            } else {
+                Result.failure(IllegalArgumentException("ID vacío"))
+            }
         } catch (e: Exception) {
-            e.printStackTrace()
             Result.failure(e)
         }
     }
