@@ -5,8 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -16,17 +16,23 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.quiquecx.simaapp.domain.entity.ActivityEntity
-import com.quiquecx.simaapp.domain.entity.HistoryEntry
-import com.quiquecx.simaapp.domain.entity.DefectEntry
-import com.quiquecx.simaapp.domain.entity.ProductivityEntity
-import com.quiquecx.simaapp.domain.entity.WorkerEntity
+import com.quiquecx.simaapp.domain.entity.*
 import java.text.SimpleDateFormat
 import java.util.*
+
+// Función auxiliar para convertir milisegundos a formato de reloj 00:00:00
+fun formatMillisToClock(millis: Long): String {
+    val totalSeconds = millis / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return String.format("%02d:%02d:%02d", hours, minutes, seconds)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,6 +41,7 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
     val history by viewModel.history.collectAsState()
     val productivityLogs by viewModel.productivityLogs.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("General", "Calidad", "Personal", "Historial")
 
@@ -59,13 +66,19 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
         }
     ) { padding ->
         if (isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
         } else {
             activity?.let { act ->
                 Column(Modifier.padding(padding)) {
                     TabRow(selectedTabIndex = selectedTab) {
                         tabs.forEachIndexed { index, title ->
-                            Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) })
+                            Tab(
+                                selected = selectedTab == index,
+                                onClick = { selectedTab = index },
+                                text = { Text(title) }
+                            )
                         }
                     }
                     when (selectedTab) {
@@ -176,10 +189,14 @@ fun WorkerItemRow(worker: WorkerEntity, serverTime: Long, onToggle: () -> Unit, 
     val cardColor by animateColorAsState(
         if (worker.isTimerActive) Color(0xFFE8F5E9) else MaterialTheme.colorScheme.surface, label = ""
     )
-    val liveHours = if (worker.isTimerActive && worker.startTime != null) {
-        val startTimeMillis = worker.startTime.toDate().time
-        maxOf(0.0, (serverTime - startTimeMillis).toDouble() / 3600000.0)
-    } else 0.0
+
+    // Calculamos el tiempo de la sesión actual en milisegundos para el reloj 00:00:00
+    val sessionMillis = if (worker.isTimerActive && worker.startTime != null) {
+        maxOf(0L, serverTime - worker.startTime.toDate().time)
+    } else 0L
+
+    // Calculamos las horas totales (acumuladas + sesión actual) en formato decimal
+    val totalHoursDecimal = worker.accumulatedHours + (sessionMillis.toDouble() / 3600000.0)
 
     Card(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -189,11 +206,30 @@ fun WorkerItemRow(worker: WorkerEntity, serverTime: Long, onToggle: () -> Unit, 
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(worker.name, fontWeight = FontWeight.Bold)
-                Text(
-                    text = "Total: ${String.format("%.4f", worker.accumulatedHours + liveHours)} hrs",
-                    fontSize = 12.sp,
-                    color = if(worker.isTimerActive) Color(0xFF2E7D32) else Color.Gray
-                )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Muestra el reloj 00:00:00 solo si está activo
+                    if (worker.isTimerActive) {
+                        Surface(
+                            color = Color(0xFF4CAF50),
+                            shape = CircleShape,
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Text(
+                                text = formatMillisToClock(sessionMillis),
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Total: ${String.format("%.4f", totalHoursDecimal)} hrs",
+                        fontSize = 12.sp,
+                        color = if(worker.isTimerActive) Color(0xFF2E7D32) else Color.Gray
+                    )
+                }
             }
             IconButton(onClick = onToggle) {
                 Icon(
@@ -223,6 +259,7 @@ fun QualityControlTab(
     var selectedTurno by remember { mutableStateOf("Mañana") }
     var newDefectName by remember { mutableStateOf("") }
     val turnos = listOf("Mañana", "Tarde", "Noche")
+
     val currentDefectsInput = remember(activity.defectos) {
         mutableStateMapOf<String, String>().apply {
             activity.defectos.forEach { put(it.name, "") }
@@ -332,7 +369,15 @@ fun QualityControlTab(
             onClick = {
                 val defects = currentDefectsInput.map { DefectEntry(it.key, it.value.toIntOrNull() ?: 0) }
                 if (isEditMode) {
+                    // 1. Guardar el ajuste
                     viewModel.adjustQualityTotals(currentOkInput.toIntOrNull() ?: activity.cantidadOk, defects)
+
+                    // 2. SALIR EN AUTOMÁTICO del modo ajuste
+                    isEditMode = false
+
+                    // 3. Limpiar inputs para que queden listos para el siguiente registro
+                    currentOkInput = ""
+                    currentDefectsInput.keys.forEach { currentDefectsInput[it] = "" }
                 } else {
                     viewModel.addQualityCaptureWithShift(currentOkInput.toIntOrNull() ?: 0, defects, selectedTurno)
                     currentOkInput = ""
@@ -340,9 +385,13 @@ fun QualityControlTab(
                 }
             },
             modifier = Modifier.fillMaxWidth().height(56.dp).padding(top = 8.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = if(isEditMode) Color.Red else MaterialTheme.colorScheme.primary)
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if(isEditMode) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary // Cambié a Verde al ser exitoso/guardado
+            )
         ) {
-            Text(if(isEditMode) "GUARDAR AJUSTE MANUAL" else "REGISTRAR LOTE - $selectedTurno")
+            Icon(if(isEditMode) Icons.Default.CheckCircle else Icons.Default.Send, null)
+            Spacer(Modifier.width(8.dp))
+            Text(if(isEditMode) "CONFIRMAR Y CERRAR AJUSTE" else "REGISTRAR LOTE - $selectedTurno")
         }
     }
 }
@@ -357,7 +406,6 @@ fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
 
     val serverTime by viewModel.currentTime.collectAsState()
 
-    // 1. TIEMPO REAL: Suma total de los cronómetros de todo el personal (Acumulado + En vivo)
     val totalHoursReal = activity.workers.sumOf { worker ->
         val liveSession = if (worker.isTimerActive && worker.startTime != null) {
             (serverTime - worker.startTime.toDate().time).toDouble() / 3600000.0
@@ -365,12 +413,7 @@ fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
         worker.accumulatedHours + liveSession
     }
 
-    // 2. TIEMPO TEÓRICO: Es el valor directo que el supervisor escribe en "Horas Est."
     val horasTeoricasPlanificadas = horasEst.replace(",", ".").toDoubleOrNull() ?: 0.0
-
-    // 3. BALANCE: Comparación directa entre lo planificado y lo consumido
-    // Si el balance es positivo, aún queda tiempo del presupuesto.
-    // Si es negativo, ya se excedieron las horas estimadas.
     val balance = horasTeoricasPlanificadas - totalHoursReal
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
@@ -419,7 +462,6 @@ fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
             }
         }
 
-        // Información de la Actividad
         Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             Column(Modifier.padding(16.dp)) {
                 Text("Responsable: ${activity.responsable}")
@@ -439,7 +481,6 @@ fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
             }
         }
 
-        // Apartado de edición para el Supervisor
         OutlinedTextField(value = cpm, onValueChange = { cpm = it }, label = { Text("CPM ID") }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
