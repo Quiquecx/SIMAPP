@@ -157,6 +157,10 @@ class ActivityDetailsViewModel @Inject constructor(
         val totalNoOkAcumulado = listaDefectosActualizada.sumOf { it.count }
         val progress = calculateProgress(totalOkAcumulado, totalNoOkAcumulado, current.cantidadTotal)
 
+        // --- LÓGICA DE ESTADO AÑADIDA AQUÍ ---
+        val totalProcesado = totalOkAcumulado + totalNoOkAcumulado
+        val nuevoEstado = if (totalProcesado >= current.cantidadTotal && current.cantidadTotal > 0) "Finalizado" else "En curso"
+
         val log = mapOf(
             "timestamp" to Timestamp.now(),
             "dia" to SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
@@ -167,17 +171,20 @@ class ActivityDetailsViewModel @Inject constructor(
         )
 
         viewModelScope.launch {
-            // Historial de turnos
             firestore.collection("activities").document(id).collection("productivity_logs").add(log)
-
-            // BUG FIX: Registrar en Historial General
             addHistoryEntry("Producción ($turno)", "${current.cantidadOk} OK", "$totalOkAcumulado OK")
+
+            // Registrar cambio de estado si ocurre
+            if (current.estado != nuevoEstado) {
+                addHistoryEntry("Estado", current.estado, nuevoEstado)
+            }
 
             updateFirestoreFields(mapOf(
                 "cantidadOk" to totalOkAcumulado,
                 "defectos" to listaDefectosActualizada,
                 "cantidadNoOk" to totalNoOkAcumulado,
-                "progreso" to progress
+                "progreso" to progress,
+                "estado" to nuevoEstado // <--- AHORA SÍ SE ACTUALIZA
             ))
         }
     }
@@ -188,6 +195,10 @@ class ActivityDetailsViewModel @Inject constructor(
         val totalNoOk = defects.sumOf { it.count }
         val progress = calculateProgress(newOkTotal, totalNoOk, current.cantidadTotal)
 
+        // LÓGICA DE ESTADO AUTOMÁTICO
+        // Si el progreso es 100 o más, es Finalizado, de lo contrario sigue En curso
+        val nuevoEstado = if (progress >= 100) "Finalizado" else "En curso"
+
         // BUG FIX: Registrar ajuste manual si hubo cambios
         if (current.cantidadOk != newOkTotal) {
             addHistoryEntry("Ajuste Manual OK", "${current.cantidadOk}", "$newOkTotal")
@@ -196,20 +207,45 @@ class ActivityDetailsViewModel @Inject constructor(
             addHistoryEntry("Ajuste Manual No OK", "${current.cantidadNoOk}", "$totalNoOk")
         }
 
+        // Registrar cambio de estado en el historial si cambió automáticamente
+        if (current.estado != nuevoEstado) {
+            addHistoryEntry("Estado", current.estado, nuevoEstado)
+        }
+
         updateFirestoreFields(mapOf(
             "cantidadOk" to newOkTotal,
             "defectos" to defects,
             "cantidadNoOk" to totalNoOk,
-            "progreso" to progress
+            "progreso" to progress,
+            "estado" to nuevoEstado // <--- Esto actualiza el campo en Firestore
         ))
     }
 
     fun deleteProductivityLog(log: ProductivityEntity) {
         val id = activityId ?: return
+        val current = _activity.value ?: return
+
         viewModelScope.launch {
             try {
+                // Al eliminar un log, debemos recalcular el progreso y estado
+                // ya que la cantidad total de OK bajará
+                val nuevaCantidadOk = (current.cantidadOk - log.cantidadOk).coerceAtLeast(0)
+                val nuevoProgreso = calculateProgress(nuevaCantidadOk, current.cantidadNoOk, current.cantidadTotal)
+                val nuevoEstado = if (nuevoProgreso >= 100) "Finalizado" else "En curso"
+
                 firestore.collection("activities").document(id)
                     .collection("productivity_logs").document(log.id).delete()
+
+                // Actualizamos la actividad principal para que el estado sea coherente con la eliminación
+                updateFirestoreFields(mapOf(
+                    "cantidadOk" to nuevaCantidadOk,
+                    "progreso" to nuevoProgreso,
+                    "estado" to nuevoEstado
+                ))
+
+                if (current.estado != nuevoEstado) {
+                    addHistoryEntry("Estado", current.estado, "$nuevoEstado (Log eliminado)")
+                }
             } catch (e: Exception) {
                 _error.value = "Error al eliminar log: ${e.message}"
             }

@@ -465,19 +465,34 @@ fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
         Card(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             Column(Modifier.padding(16.dp)) {
                 Text("Responsable: ${activity.responsable}")
-                Text("Estado: ${activity.estado}", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+
+                val colorEstado = when (activity.estado) {
+                    "Finalizado" -> Color(0xFF2E7D32)
+                    "En curso" -> Color(0xFF1976D2)
+                    else -> Color.Gray
+                }
+
+                Text(
+                    text = "Estado: ${activity.estado.uppercase()}",
+                    fontWeight = FontWeight.Black,
+                    color = colorEstado
+                )
+
                 Spacer(Modifier.height(12.dp))
 
-                val totalLoteNum = total.toIntOrNull() ?: 0
+                // --- CAMBIO AQUÍ: USA activity.cantidadTotal EN LUGAR DE total ---
                 val procesadasActual = (activity.cantidadOk + activity.cantidadNoOk).toDouble()
-                val progreso = if (totalLoteNum > 0) ((procesadasActual / totalLoteNum) * 100).toInt().coerceIn(0, 100) else 0
+                val progresoReal = if (activity.cantidadTotal > 0) {
+                    ((procesadasActual / activity.cantidadTotal) * 100).toInt().coerceIn(0, 100)
+                } else 0
 
                 LinearProgressIndicator(
-                    progress = { progreso / 100f },
+                    progress = { progresoReal / 100f },
                     modifier = Modifier.fillMaxWidth().height(8.dp),
-                    strokeCap = StrokeCap.Round
+                    strokeCap = StrokeCap.Round,
+                    color = if (progresoReal >= 100) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary
                 )
-                Text("Progreso de Producción: $progreso%", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("Progreso Real: $progresoReal%", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
         }
 
