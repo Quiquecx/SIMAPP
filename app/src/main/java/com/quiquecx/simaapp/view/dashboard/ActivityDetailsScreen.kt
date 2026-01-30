@@ -1,6 +1,7 @@
 package com.quiquecx.simaapp.view.dashboard
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -43,7 +44,8 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
     val isLoading by viewModel.isLoading.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("General", "Calidad", "Personal", "Historial")
+    // Actualizamos las pestañas para incluir Reportes
+    val tabs = listOf("General", "Calidad", "Personal", "Reportes")
 
     var showDeleteActivityDialog by remember { mutableStateOf(false) }
     var logToDelete by remember { mutableStateOf<ProductivityEntity?>(null) }
@@ -77,7 +79,7 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
                             Tab(
                                 selected = selectedTab == index,
                                 onClick = { selectedTab = index },
-                                text = { Text(title) }
+                                text = { Text(title, fontSize = 13.sp) }
                             )
                         }
                     }
@@ -85,7 +87,7 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
                         0 -> GeneralDetailsTab(act, viewModel)
                         1 -> QualityControlTab(act, productivityLogs, viewModel) { logToDelete = it }
                         2 -> PersonnelTab(act, viewModel)
-                        3 -> HistoryTab(history)
+                        3 -> ReportsTab(viewModel, history) // Nueva pestaña de reportes
                     }
                 }
             }
@@ -124,6 +126,186 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
                 TextButton(onClick = { logToDelete = null }) { Text("CANCELAR") }
             }
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>) {
+    val filteredLogs by viewModel.filteredLogs.collectAsState()
+
+    // 0: Hoy, 1: 7D, 2: 30D, 3: Todo, 4: Personalizado
+    var selectedFilter by remember { mutableIntStateOf(0) }
+    var showTechnicalHistory by remember { mutableStateOf(false) }
+
+    // Estados para Material3 DatePickers
+    val datePickerState = rememberDatePickerState()
+    val dateRangePickerState = rememberDateRangePickerState()
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showRangePicker by remember { mutableStateOf(false) }
+    var customLabel by remember { mutableStateOf("Calendario") }
+
+    // Lógica de disparo de filtros
+    LaunchedEffect(
+        selectedFilter,
+        datePickerState.selectedDateMillis,
+        dateRangePickerState.selectedStartDateMillis,
+        dateRangePickerState.selectedEndDateMillis
+    ) {
+        when(selectedFilter) {
+            0 -> { viewModel.filterProductivityByRange(0); customLabel = "Calendario" }
+            1 -> { viewModel.filterProductivityByRange(7); customLabel = "Calendario" }
+            2 -> { viewModel.filterProductivityByRange(30); customLabel = "Calendario" }
+            3 -> { viewModel.filterProductivityByRange(null); customLabel = "Calendario" }
+            4 -> {
+                // Si hay un rango seleccionado en el RangePicker
+                val startR = dateRangePickerState.selectedStartDateMillis
+                val endR = dateRangePickerState.selectedEndDateMillis
+
+                if (startR != null && endR != null) {
+                    viewModel.filterProductivityByCustomRange(startR, endR)
+                    val sdf = SimpleDateFormat("dd/MM", Locale.getDefault())
+                    customLabel = "${sdf.format(Date(startR))} - ${sdf.format(Date(endR))}"
+                } else {
+                    // Si es solo un día en el DatePicker
+                    datePickerState.selectedDateMillis?.let {
+                        viewModel.filterProductivityByCustomRange(it, it)
+                        val sdf = SimpleDateFormat("dd/MM/yy", Locale.getDefault())
+                        customLabel = sdf.format(Date(it))
+                    }
+                }
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        // Cabecera con alternancia de historial técnico
+        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+            Text(
+                if (showTechnicalHistory) "Historial Técnico" else "Reporte de Producción",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black
+            )
+            IconButton(onClick = { showTechnicalHistory = !showTechnicalHistory }) {
+                Icon(
+                    if (showTechnicalHistory) Icons.Default.Assessment else Icons.Default.History,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        if (!showTechnicalHistory) {
+            // Barra de Filtros con Scroll Horizontal
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val opciones = listOf("Hoy", "7D", "30D", "Todo")
+                    opciones.forEachIndexed { index, texto ->
+                        FilterChip(
+                            selected = selectedFilter == index,
+                            onClick = { selectedFilter = index },
+                            label = { Text(texto) }
+                        )
+                    }
+
+                    // Chip de Calendario
+                    FilterChip(
+                        selected = selectedFilter == 4,
+                        onClick = { showDatePicker = true },
+                        label = { Text(customLabel) },
+                        leadingIcon = { Icon(Icons.Default.DateRange, null, Modifier.size(16.dp)) }
+                    )
+                }
+
+            }
+
+            // Resumen de Totales
+            val totalOk = filteredLogs.sumOf { it.cantidadOk }
+            val totalDef = filteredLogs.sumOf { it.defectos.sumOf { d -> d.count } }
+
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Row(Modifier.padding(16.dp).fillMaxWidth(), Arrangement.SpaceAround) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("PIEZAS OK", style = MaterialTheme.typography.labelSmall)
+                        Text("$totalOk", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("DEFECTOS", style = MaterialTheme.typography.labelSmall)
+                        Text("$totalDef", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.Red)
+                    }
+                }
+            }
+
+            // Lista de Resultados
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (filteredLogs.isEmpty()) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text("Sin registros en este periodo", color = Color.Gray)
+                        }
+                    }
+                }
+                items(filteredLogs) { log ->
+                    ProductivityLogItem(log, onDelete = {})
+                }
+            }
+        } else {
+            HistoryTab(history)
+        }
+    }
+
+    // --- DIÁLOGOS DE SELECCIÓN DE FECHA ---
+
+    // 1. Selector de Día Único
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedFilter = 4
+                    showDatePicker = false
+                }) { Text("SELECCIONAR") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showRangePicker = true
+                    showDatePicker = false
+                }) { Text("VER RANGO") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    // 2. Selector de Rango de Fechas
+    if (showRangePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showRangePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedFilter = 4
+                    showRangePicker = false
+                }) { Text("APLICAR RANGO") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRangePicker = false }) { Text("CANCELAR") }
+            }
+        ) {
+            DateRangePicker(
+                state = dateRangePickerState,
+                title = { Text("Rango de producción", Modifier.padding(16.dp)) },
+                modifier = Modifier.height(450.dp)
+            )
+        }
     }
 }
 
@@ -190,12 +372,10 @@ fun WorkerItemRow(worker: WorkerEntity, serverTime: Long, onToggle: () -> Unit, 
         if (worker.isTimerActive) Color(0xFFE8F5E9) else MaterialTheme.colorScheme.surface, label = ""
     )
 
-    // Calculamos el tiempo de la sesión actual en milisegundos para el reloj 00:00:00
     val sessionMillis = if (worker.isTimerActive && worker.startTime != null) {
         maxOf(0L, serverTime - worker.startTime.toDate().time)
     } else 0L
 
-    // Calculamos las horas totales (acumuladas + sesión actual) en formato decimal
     val totalHoursDecimal = worker.accumulatedHours + (sessionMillis.toDouble() / 3600000.0)
 
     Card(
@@ -208,7 +388,6 @@ fun WorkerItemRow(worker: WorkerEntity, serverTime: Long, onToggle: () -> Unit, 
                 Text(worker.name, fontWeight = FontWeight.Bold)
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Muestra el reloj 00:00:00 solo si está activo
                     if (worker.isTimerActive) {
                         Surface(
                             color = Color(0xFF4CAF50),
@@ -369,13 +548,8 @@ fun QualityControlTab(
             onClick = {
                 val defects = currentDefectsInput.map { DefectEntry(it.key, it.value.toIntOrNull() ?: 0) }
                 if (isEditMode) {
-                    // 1. Guardar el ajuste
                     viewModel.adjustQualityTotals(currentOkInput.toIntOrNull() ?: activity.cantidadOk, defects)
-
-                    // 2. SALIR EN AUTOMÁTICO del modo ajuste
                     isEditMode = false
-
-                    // 3. Limpiar inputs para que queden listos para el siguiente registro
                     currentOkInput = ""
                     currentDefectsInput.keys.forEach { currentDefectsInput[it] = "" }
                 } else {
@@ -386,7 +560,7 @@ fun QualityControlTab(
             },
             modifier = Modifier.fillMaxWidth().height(56.dp).padding(top = 8.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if(isEditMode) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary // Cambié a Verde al ser exitoso/guardado
+                containerColor = if(isEditMode) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary
             )
         ) {
             Icon(if(isEditMode) Icons.Default.CheckCircle else Icons.Default.Send, null)
@@ -480,7 +654,6 @@ fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
 
                 Spacer(Modifier.height(12.dp))
 
-                // --- CAMBIO AQUÍ: USA activity.cantidadTotal EN LUGAR DE total ---
                 val procesadasActual = (activity.cantidadOk + activity.cantidadNoOk).toDouble()
                 val progresoReal = if (activity.cantidadTotal > 0) {
                     ((procesadasActual / activity.cantidadTotal) * 100).toInt().coerceIn(0, 100)

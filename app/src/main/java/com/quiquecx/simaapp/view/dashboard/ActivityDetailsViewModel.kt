@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.net.URLDecoder
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
@@ -47,6 +48,9 @@ class ActivityDetailsViewModel @Inject constructor(
 
     private val _productivityLogs = MutableStateFlow<List<ProductivityEntity>>(emptyList())
     val productivityLogs: StateFlow<List<ProductivityEntity>> = _productivityLogs.asStateFlow()
+
+    private val _filteredLogs = MutableStateFlow<List<ProductivityEntity>>(emptyList())
+    val filteredLogs: StateFlow<List<ProductivityEntity>> = _filteredLogs.asStateFlow()
 
     private val currentUser get() = auth.currentUser
     private val currentUserName get() = currentUser?.email ?: "Desconocido"
@@ -344,6 +348,85 @@ class ActivityDetailsViewModel @Inject constructor(
             .orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, _ ->
                 _productivityLogs.value = snapshot?.documents?.mapNotNull { doc ->
+                    val entity = doc.toObject(ProductivityEntity::class.java)
+                    entity?.copy(id = doc.id)
+                } ?: emptyList()
+            }
+    }
+
+// --- REPORTES Y FILTRADO ---
+
+    /**
+     * Filtra por periodos rápidos (Hoy, 7 días, 30 días o Todo)
+     */
+    fun filterProductivityByRange(daysBack: Int?) {
+        val id = activityId ?: return
+        val calendar = Calendar.getInstance()
+
+        // Fin del rango: hoy al final del día
+        calendar.set(Calendar.HOUR_OF_DAY, 23)
+        calendar.set(Calendar.MINUTE, 59)
+        calendar.set(Calendar.SECOND, 59)
+        val endDate = calendar.time
+
+        // Inicio del rango
+        if (daysBack != null) {
+            // Si daysBack es 0, resta 0 días (se queda hoy), si es 7, resta 7 días
+            calendar.add(Calendar.DAY_OF_YEAR, -daysBack)
+            calendar.set(Calendar.HOUR_OF_DAY, 0)
+            calendar.set(Calendar.MINUTE, 0)
+            calendar.set(Calendar.SECOND, 0)
+        } else {
+            // Filtro total: desde el inicio de los tiempos
+            calendar.set(2020, 0, 1)
+        }
+        val startDate = calendar.time
+
+        executeProductivityQuery(id, startDate, endDate)
+    }
+
+    /**
+     * Filtra por una selección específica del calendario (Día único o Rango)
+     */
+    fun filterProductivityByCustomRange(startMillis: Long, endMillis: Long) {
+        val id = activityId ?: return
+
+        // Ajustar inicio al primer segundo del día seleccionado
+        val startCal = Calendar.getInstance().apply {
+            timeInMillis = startMillis
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        // Ajustar fin al último segundo del día seleccionado
+        val endCal = Calendar.getInstance().apply {
+            timeInMillis = endMillis
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }
+
+        executeProductivityQuery(id, startCal.time, endCal.time)
+    }
+
+    /**
+     * Función interna para evitar repetir la lógica de Firestore
+     */
+    private fun executeProductivityQuery(id: String, startDate: Date, endDate: Date) {
+        firestore.collection("activities").document(id)
+            .collection("productivity_logs")
+            .whereGreaterThanOrEqualTo("timestamp", Timestamp(startDate))
+            .whereLessThanOrEqualTo("timestamp", Timestamp(endDate))
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    _error.value = "Error en reporte: ${e.message}"
+                    return@addSnapshotListener
+                }
+                _filteredLogs.value = snapshot?.documents?.mapNotNull { doc ->
                     val entity = doc.toObject(ProductivityEntity::class.java)
                     entity?.copy(id = doc.id)
                 } ?: emptyList()
