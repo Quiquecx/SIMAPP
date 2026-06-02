@@ -31,8 +31,14 @@ class DashboardRepositoryImpl @Inject constructor(
     override suspend fun getActivityDetails(activityId: String): ActivityEntity? {
         return try {
             val snapshot = activitiesCollection.document(activityId).get().await()
-            // Importante: al convertir a objeto, el @DocumentId del DTO se llena automáticamente
-            snapshot.toObject(ActivityDto::class.java)?.toEntity()
+            android.util.Log.d("REPO", "Documento existe: ${snapshot.exists()}")
+            if (snapshot.exists()) {
+                val dto = snapshot.toObject(ActivityDto::class.java)
+                android.util.Log.d("REPO", "DTO convertido: $dto")
+                dto?.toEntity()
+            } else {
+                null
+            }
         } catch (e: Exception) {
             android.util.Log.e("REPO_ERROR", "Error obteniendo detalles: ${e.message}")
             null

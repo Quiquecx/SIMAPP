@@ -61,7 +61,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     // Implementación de Material Design 3
-    implementation("androidx.compose.material3:material3:1.2.1") // O la versión que uses
+    implementation("androidx.compose.material3:material3:1.2.1") //
 
     // Para los iconos extendidos (como CalendarToday)
     implementation("androidx.compose.material:material-icons-extended")
@@ -94,6 +94,10 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation)
     ksp(libs.hilt.compiler)
+
+    //reportes
+
+    implementation("com.github.doyaaaaaken:kotlin-csv-jvm:1.9.3")
 
     //testing
     testImplementation(libs.junit)

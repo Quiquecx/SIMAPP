@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -18,11 +19,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.quiquecx.simaapp.domain.entity.*
+import com.quiquecx.simaapp.view.reports.ReportConfigScreen
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -573,12 +578,17 @@ fun QualityControlTab(
 // --- PESTAÑA: GENERAL ---
 @Composable
 fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
+    android.util.Log.d("GeneralTab", "ID de actividad: ${activity.id}")
+    val context = LocalContext.current  // ← Obtener contexto de la actividad (fuera del diálogo)
+
     var cpm by remember(activity.id) { mutableStateOf(activity.cpmId) }
     var total by remember(activity.id) { mutableStateOf(activity.cantidadTotal.toString()) }
     var nota by remember(activity.id) { mutableStateOf(activity.defectoNota) }
     var horasEst by remember(activity.id) { mutableStateOf(activity.estimadoHoras) }
 
     val serverTime by viewModel.currentTime.collectAsState()
+
+    var showReportDialog by remember { mutableStateOf(false) }
 
     val totalHoursReal = activity.workers.sumOf { worker ->
         val liveSession = if (worker.isTimerActive && worker.startTime != null) {
@@ -591,7 +601,21 @@ fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
     val balance = horasTeoricasPlanificadas - totalHoursReal
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("Rendimiento Operativo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        // Cabecera con título y botón de exportar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Rendimiento Operativo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            IconButton(onClick = { showReportDialog = true }) {
+                Icon(
+                    Icons.Default.Print,
+                    contentDescription = "Exportar reporte",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
         Spacer(Modifier.height(8.dp))
 
         Card(
@@ -705,6 +729,28 @@ fun GeneralDetailsTab(activity: ActivityEntity, viewModel: ActivityDetailsViewMo
             Icon(Icons.Default.Save, null)
             Spacer(Modifier.width(8.dp))
             Text("ACTUALIZAR PLAN")
+        }
+    }
+
+    // Diálogo para generar reporte personalizado de la actividad actual
+    if (showReportDialog) {
+        Dialog(
+            onDismissRequest = { showReportDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .fillMaxHeight(0.9f),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                ReportConfigScreen(
+                    activityId = activity.id,
+                    activityContext = context,   // ← Pasar el contexto de actividad
+                    onBack = { showReportDialog = false }
+                )
+            }
         }
     }
 }

@@ -13,9 +13,11 @@
     import com.quiquecx.simaapp.data.repository.DashboardRepositoryImpl
     import com.quiquecx.simaapp.domain.repository.CompanyRepository
     import com.quiquecx.simaapp.data.repository.ProjectsRepositoryImpl
+    import com.quiquecx.simaapp.data.repository.ReportRepositoryImpl
     import com.quiquecx.simaapp.domain.repository.AuthRepository
     import com.quiquecx.simaapp.domain.repository.DashboardRepository
     import com.quiquecx.simaapp.domain.repository.ProjectsRepository
+    import com.quiquecx.simaapp.domain.repository.ReportRepository
     import com.quiquecx.simaapp.domain.repository.SelectedCompanyRepository
     import dagger.Module
     import dagger.Provides
@@ -85,5 +87,11 @@
         fun provideDashboardRepository(firestore: FirebaseFirestore): DashboardRepository {
             return DashboardRepositoryImpl(firestore)
         }
+
+
+        // NUEVO: Proveer ReportRepository
+        @Provides
+        @Singleton
+        fun provideReportRepository(impl: ReportRepositoryImpl): ReportRepository = impl
 
     }
