@@ -1,7 +1,6 @@
 package com.quiquecx.simaapp.utils
 
 import android.content.Context
-import com.github.doyaaaaaken.kotlincsv.dsl.csvWriter
 import com.quiquecx.simaapp.domain.entity.ActivityEntity
 import com.quiquecx.simaapp.domain.entity.ReportConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -11,52 +10,68 @@ import javax.inject.Inject
 class CsvGenerator @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    fun generate(activities: List<ActivityEntity>, config: ReportConfig): File {
+    suspend fun generate(activities: List<ActivityEntity>, config: ReportConfig): File {
         val file = File(context.cacheDir, "report_${System.currentTimeMillis()}.csv")
-        csvWriter().open(file) {
-            // Encabezados
-            val headers = mutableListOf<String>()
-            if (config.includeGeneralInfo) headers.addAll(listOf("ID", "Tipo", "Proveedor", "Material", "CPM", "Responsable", "Estado"))
-            if (config.includeWorkers) headers.add("Personal (horas)")
-            if (config.includeDefects) headers.add("Defectos")
-            if (config.includeProductivity) headers.addAll(listOf("HorasReales", "HorasEstimadas", "Productividad%"))
-            if (config.includeCosts) headers.add("CostoEstimado")
-            writeRow(headers)
+
+        val csvContent = buildString {
+            // Header
+            if (config.includeGeneralInfo) {
+                append("ID,Tipo,Proveedor ID,Material ID,CPM ID,Responsable,Estado,")
+            }
+            if (config.includeWorkers) {
+                append("Personal,Horas Acumuladas,")
+            }
+            if (config.includeDefects) {
+                append("Defectos,")
+            }
+            if (config.includeProductivity) {
+                append("Productividad (%),Horas Estimadas,Horas Reales,")
+            }
+            if (config.includeCosts) {
+                append("Costo Estimado,")
+            }
+            appendLine()
 
             // Datos
             activities.forEach { activity ->
-                val row = mutableListOf<String>()
                 if (config.includeGeneralInfo) {
-                    row.add(activity.id)
-                    row.add(activity.tipo)
-                    row.add(activity.proveedorId)
-                    row.add(activity.materialId)
-                    row.add(activity.cpmId)
-                    row.add(activity.responsable)
-                    row.add(activity.estado)
+                    append("\"${activity.id}\",")
+                    append("\"${activity.tipo}\",")
+                    append("\"${activity.proveedorId}\",")
+                    append("\"${activity.materialId}\",")
+                    append("\"${activity.cpmId}\",")
+                    append("\"${activity.responsable}\",")
+                    append("\"${activity.estado}\",")
                 }
                 if (config.includeWorkers) {
-                    val workersStr = activity.workers.joinToString(";") { "${it.name}(${String.format("%.2f", it.accumulatedHours)}h)" }
-                    row.add(workersStr)
+                    val workers = activity.workers.joinToString(";") { it.name }
+                    append("\"$workers\",")
+                    append("${activity.horasAcumuladas},")
                 }
                 if (config.includeDefects) {
-                    val defectsStr = activity.defectos.joinToString(";") { "${it.name}:${it.count}" }
-                    row.add(defectsStr)
+                    val defects = activity.defectos.joinToString(";") { "${it.name}:${it.count}" }
+                    append("\"$defects\",")
                 }
                 if (config.includeProductivity) {
-                    val real = activity.horasAcumuladas
-                    val estimado = activity.estimadoHoras.toDoubleOrNull() ?: 0.0
-                    val prod = if (estimado > 0) ((real / estimado) * 100).toInt() else 0
-                    row.add(real.toString())
-                    row.add(estimado.toString())
-                    row.add(prod.toString())
+                    val productivity = calculateProductivity(activity)
+                    append("$productivity,")
+                    append("\"${activity.estimadoHoras}\",")
+                    append("${activity.horasAcumuladas},")
                 }
                 if (config.includeCosts) {
-                    row.add(activity.estimadoCosto)
+                    append("\"${activity.estimadoCosto}\",")
                 }
-                writeRow(row)
+                appendLine()
             }
         }
+
+        file.writeText(csvContent)
         return file
+    }
+
+    private fun calculateProductivity(activity: ActivityEntity): Int {
+        val estimado = activity.estimadoHoras.toDoubleOrNull() ?: 0.0
+        val real = activity.horasAcumuladas
+        return if (estimado > 0) ((real / estimado) * 100).toInt().coerceIn(0, 100) else 0
     }
 }

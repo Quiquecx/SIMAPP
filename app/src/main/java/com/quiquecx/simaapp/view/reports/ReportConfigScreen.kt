@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.firebase.Timestamp
 import com.quiquecx.simaapp.domain.entity.ReportFormat
+import com.quiquecx.simaapp.domain.entity.TimeFilter
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -20,11 +21,10 @@ import java.util.*
 @Composable
 fun ReportConfigScreen(
     activityId: String? = null,
-    activityContext: Context,          // ← Contexto de actividad (pasado desde el padre)
+    activityContext: Context,
     onBack: () -> Unit,
     viewModel: ReportConfigViewModel = hiltViewModel()
 ) {
-    // Inicializar el ViewModel con el activityId (modo específico o normal)
     LaunchedEffect(activityId) {
         viewModel.setActivityId(activityId)
     }
@@ -48,7 +48,7 @@ fun ReportConfigScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { viewModel.generateAndShare(activityContext) }, // ← Pasar contexto
+                        onClick = { viewModel.generateAndShare(activityContext) },
                         enabled = !uiState.isGenerating
                     ) {
                         if (uiState.isGenerating) {
@@ -68,7 +68,6 @@ fun ReportConfigScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Si es modo específico, mostrar un mensaje informativo y ocultar filtros
             if (isSpecificMode) {
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -80,14 +79,79 @@ fun ReportConfigScreen(
                     }
                 }
             } else {
-                // Filtros completos (solo en modo normal)
+                // ✅ Filtro de tiempo
                 item {
                     Card {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Filtros", style = MaterialTheme.typography.titleMedium)
+                            Text("Filtro de Tiempo", style = MaterialTheme.typography.titleMedium)
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Empresa
+                            ExposedDropdownMenuBox(
+                                expanded = uiState.timeFilterExpanded,
+                                onExpandedChange = { viewModel.toggleTimeFilterMenu() }
+                            ) {
+                                OutlinedTextField(
+                                    value = when (uiState.selectedTimeFilter) {
+                                        TimeFilter.TODAY -> "Hoy"
+                                        TimeFilter.LAST_7_DAYS -> "Últimos 7 días"
+                                        TimeFilter.LAST_30_DAYS -> "Últimos 30 días"
+                                        TimeFilter.ALL -> "Todo"
+                                        TimeFilter.CUSTOM -> "Rango personalizado"
+                                    },
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("Período") },
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = uiState.timeFilterExpanded) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = uiState.timeFilterExpanded,
+                                    onDismissRequest = { viewModel.toggleTimeFilterMenu() }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("🔷 Hoy") },
+                                        onClick = { viewModel.selectTimeFilter(TimeFilter.TODAY) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("📅 Últimos 7 días") },
+                                        onClick = { viewModel.selectTimeFilter(TimeFilter.LAST_7_DAYS) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("📆 Últimos 30 días") },
+                                        onClick = { viewModel.selectTimeFilter(TimeFilter.LAST_30_DAYS) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("⏳ Todo") },
+                                        onClick = { viewModel.selectTimeFilter(TimeFilter.ALL) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("📝 Rango personalizado") },
+                                        onClick = { viewModel.selectTimeFilter(TimeFilter.CUSTOM) }
+                                    )
+                                }
+                            }
+
+                            // Mostrar fechas seleccionadas
+                            if (uiState.startDate != null && uiState.endDate != null) {
+                                val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Del ${dateFormat.format(uiState.startDate!!.toDate())} al ${dateFormat.format(uiState.endDate!!.toDate())}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Filtros de empresa y proyecto
+                item {
+                    Card {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Filtros Adicionales", style = MaterialTheme.typography.titleMedium)
+                            Spacer(modifier = Modifier.height(8.dp))
+
                             ExposedDropdownMenuBox(
                                 expanded = uiState.companyMenuExpanded,
                                 onExpandedChange = { viewModel.toggleCompanyMenu() }
@@ -118,7 +182,6 @@ fun ReportConfigScreen(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Proyecto
                             ExposedDropdownMenuBox(
                                 expanded = uiState.projectMenuExpanded,
                                 onExpandedChange = { viewModel.toggleProjectMenu() }
@@ -156,37 +219,6 @@ fun ReportConfigScreen(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Rango de fechas
-                            val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = uiState.startDate?.let { dateFormat.format(it.toDate()) } ?: "",
-                                    onValueChange = {},
-                                    label = { Text("Fecha inicio") },
-                                    readOnly = true,
-                                    modifier = Modifier.weight(1f),
-                                    trailingIcon = {
-                                        IconButton(onClick = { viewModel.showStartDatePicker() }) {
-                                            Icon(Icons.Default.DateRange, null)
-                                        }
-                                    }
-                                )
-                                OutlinedTextField(
-                                    value = uiState.endDate?.let { dateFormat.format(it.toDate()) } ?: "",
-                                    onValueChange = {},
-                                    label = { Text("Fecha fin") },
-                                    readOnly = true,
-                                    modifier = Modifier.weight(1f),
-                                    trailingIcon = {
-                                        IconButton(onClick = { viewModel.showEndDatePicker() }) {
-                                            Icon(Icons.Default.DateRange, null)
-                                        }
-                                    }
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
                             Text("Productividad mínima: ${config.minProductivity}%")
                             Slider(
                                 value = config.minProductivity.toFloat(),
@@ -199,47 +231,48 @@ fun ReportConfigScreen(
                 }
             }
 
-            // Checklist (siempre visible)
+            // Checklist con "Historial"
             item {
                 Card {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Incluir en el reporte", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = config.includeGeneralInfo,
-                                onCheckedChange = { viewModel.updateConfig { it.copy(includeGeneralInfo = !it.includeGeneralInfo) } }
-                            )
-                            Text("Datos generales")
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = config.includeWorkers,
-                                onCheckedChange = { viewModel.updateConfig { it.copy(includeWorkers = !it.includeWorkers) } }
-                            )
-                            Text("Personal y tiempos")
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = config.includeDefects,
-                                onCheckedChange = { viewModel.updateConfig { it.copy(includeDefects = !it.includeDefects) } }
-                            )
-                            Text("Defectos")
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = config.includeProductivity,
-                                onCheckedChange = { viewModel.updateConfig { it.copy(includeProductivity = !it.includeProductivity) } }
-                            )
-                            Text("Productividad")
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = config.includeCosts,
-                                onCheckedChange = { viewModel.updateConfig { it.copy(includeCosts = !it.includeCosts) } }
-                            )
-                            Text("Costos")
-                        }
+
+                        ReportCheckboxItem(
+                            label = "Datos generales",
+                            checked = config.includeGeneralInfo,
+                            onCheckedChange = { viewModel.updateConfig { it.copy(includeGeneralInfo = !it.includeGeneralInfo) } }
+                        )
+
+                        ReportCheckboxItem(
+                            label = "Personal y tiempos",
+                            checked = config.includeWorkers,
+                            onCheckedChange = { viewModel.updateConfig { it.copy(includeWorkers = !it.includeWorkers) } }
+                        )
+
+                        ReportCheckboxItem(
+                            label = "Defectos",
+                            checked = config.includeDefects,
+                            onCheckedChange = { viewModel.updateConfig { it.copy(includeDefects = !it.includeDefects) } }
+                        )
+
+                        ReportCheckboxItem(
+                            label = "Productividad",
+                            checked = config.includeProductivity,
+                            onCheckedChange = { viewModel.updateConfig { it.copy(includeProductivity = !it.includeProductivity) } }
+                        )
+
+                        ReportCheckboxItem(
+                            label = "Costos",
+                            checked = config.includeCosts,
+                            onCheckedChange = { viewModel.updateConfig { it.copy(includeCosts = !it.includeCosts) } }
+                        )
+
+                        ReportCheckboxItem(
+                            label = "Historial detallado (horas por día/persona)",
+                            checked = config.includeHistory,
+                            onCheckedChange = { viewModel.updateConfig { it.copy(includeHistory = !it.includeHistory) } }
+                        )
                     }
                 }
             }
@@ -250,32 +283,22 @@ fun ReportConfigScreen(
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Formato de salida", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(
-                                    selected = config.format == ReportFormat.PDF,
-                                    onClick = { viewModel.updateConfig { it.copy(format = ReportFormat.PDF) } }
-                                )
-                                Text("HTML (vista web)")
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(
-                                    selected = config.format == ReportFormat.EXCEL,
-                                    onClick = { viewModel.updateConfig { it.copy(format = ReportFormat.EXCEL) } }
-                                )
-                                Text("CSV")
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(
-                                    selected = config.format == ReportFormat.CSV,
-                                    onClick = { viewModel.updateConfig { it.copy(format = ReportFormat.CSV) } }
-                                )
-                                Text("CSV")
-                            }
-                        }
+
+                        ReportFormatOption(
+                            label = "HTML (vista web)",
+                            selected = config.format == ReportFormat.PDF,
+                            onClick = { viewModel.updateConfig { it.copy(format = ReportFormat.PDF) } }
+                        )
+
+                        ReportFormatOption(
+                            label = "CSV",
+                            selected = config.format == ReportFormat.CSV,
+                            onClick = { viewModel.updateConfig { it.copy(format = ReportFormat.CSV) } }
+                        )
+
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "El formato HTML se abre en el navegador y puedes guardarlo como PDF desde el menú del navegador.",
+                            text = "📌 HTML se abre en navegador y puedes guardarlo como PDF. CSV es ideal para Excel.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -283,22 +306,23 @@ fun ReportConfigScreen(
                 }
             }
 
-            // Mensaje de error si existe
+            // Mensaje de error
             if (uiState.error != null) {
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                         Text(
-                            text = uiState.error!!,
+                            text = "❌ ${uiState.error}",
                             modifier = Modifier.padding(16.dp),
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                     }
                 }
             }
+
         }
     }
 
-    // DatePicker diálogos (solo se muestran en modo normal cuando se necesita filtrar por fechas)
+    // ✅ DatePicker CORRECTO
     if (!isSpecificMode && uiState.showStartDatePicker) {
         DatePickerDialog(
             onDismissRequest = { viewModel.hideStartDatePicker() },
@@ -335,5 +359,40 @@ fun ReportConfigScreen(
         ) {
             DatePicker(state = viewModel.endDatePickerState)
         }
+    }
+}
+
+// ✅ Componentes auxiliares
+@Composable
+fun ReportCheckboxItem(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        Text(label, modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
+@Composable
+fun ReportFormatOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Text(label, modifier = Modifier.padding(start = 8.dp))
     }
 }

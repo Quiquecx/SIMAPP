@@ -6,9 +6,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.Timestamp
-import com.quiquecx.simaapp.domain.entity.CompanyEntity
-import com.quiquecx.simaapp.domain.entity.ProjectEntity
-import com.quiquecx.simaapp.domain.entity.ReportConfig
+import com.quiquecx.simaapp.domain.entity.*
 import com.quiquecx.simaapp.domain.repository.DashboardRepository
 import com.quiquecx.simaapp.domain.useCase.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -16,6 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.*
 import javax.inject.Inject
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -27,7 +26,7 @@ class ReportConfigViewModel @Inject constructor(
     private val getFilteredActivitiesUseCase: GetFilteredActivitiesForReportUseCase,
     private val generateReportUseCase: GenerateReportUseCase,
     private val shareReportUseCase: ShareReportUseCase,
-    private val dashboardRepository: DashboardRepository, // 👈 Nuevo: para obtener actividad específica
+    private val dashboardRepository: DashboardRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -39,32 +38,30 @@ class ReportConfigViewModel @Inject constructor(
         val selectedProjectName: String = "Todos los proyectos",
         val companyMenuExpanded: Boolean = false,
         val projectMenuExpanded: Boolean = false,
+        // ✅ NUEVO: Campos para filtro de tiempo
+        val timeFilterExpanded: Boolean = false,
+        val selectedTimeFilter: TimeFilter = TimeFilter.ALL,
         val isGenerating: Boolean = false,
         val error: String? = null,
         val showStartDatePicker: Boolean = false,
         val showEndDatePicker: Boolean = false,
         val startDate: Timestamp? = null,
         val endDate: Timestamp? = null,
-        val isSpecificActivity: Boolean = false   // 👈 Nuevo flag
+        val isSpecificActivity: Boolean = false
     )
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState = _uiState.asStateFlow()
 
-    val startDatePickerState = DatePickerState(locale = java.util.Locale.getDefault())
-    val endDatePickerState = DatePickerState(locale = java.util.Locale.getDefault())
+    val startDatePickerState = DatePickerState(locale = Locale.getDefault())
+    val endDatePickerState = DatePickerState(locale = Locale.getDefault())
 
     private var specificActivityId: String? = null
 
-    // Inicialización normal (modo general)
     init {
         loadInitialData()
     }
 
-    /**
-     * Llama a este método si quieres inicializar el ViewModel en modo "actividad específica".
-     * @param activityId ID de la actividad a exportar, o null para modo general.
-     */
     fun setActivityId(activityId: String?) {
         android.util.Log.d("ReportConfig", "setActivityId llamado con: $activityId")
         specificActivityId = activityId
@@ -81,7 +78,6 @@ class ReportConfigViewModel @Inject constructor(
             }
         }
     }
-
 
     private fun loadInitialData() {
         viewModelScope.launch {
@@ -119,6 +115,64 @@ class ReportConfigViewModel @Inject constructor(
             config = _uiState.value.config.copy(projectId = project?.id),
             selectedProjectName = project?.name ?: "Todos los proyectos"
         )
+    }
+
+    // ✅ NUEVO: Manejo de filtros de tiempo
+    fun selectTimeFilter(filter: TimeFilter) {
+        val (startDate, endDate) = when (filter) {
+            TimeFilter.TODAY -> {
+                val start = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                }
+                val end = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 23)
+                    set(Calendar.MINUTE, 59)
+                    set(Calendar.SECOND, 59)
+                }
+                Pair(Timestamp(start.time), Timestamp(end.time))
+            }
+            TimeFilter.LAST_7_DAYS -> {
+                val start = Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_YEAR, -7)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                }
+                val end = Calendar.getInstance()
+                Pair(Timestamp(start.time), Timestamp(end.time))
+            }
+            TimeFilter.LAST_30_DAYS -> {
+                val start = Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_YEAR, -30)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                }
+                val end = Calendar.getInstance()
+                Pair(Timestamp(start.time), Timestamp(end.time))
+            }
+            TimeFilter.ALL -> {
+                Pair(null, null)
+            }
+            TimeFilter.CUSTOM -> {
+                // No cambiar fechas si es personalizado
+                return
+            }
+        }
+
+        _uiState.value = _uiState.value.copy(
+            selectedTimeFilter = filter,
+            config = _uiState.value.config.copy(
+                timeFilter = filter,
+                startDate = startDate,
+                endDate = endDate
+            ),
+            startDate = startDate,
+            endDate = endDate,
+            timeFilterExpanded = false
+        )
+    }
+
+    fun toggleTimeFilterMenu() {
+        _uiState.value = _uiState.value.copy(timeFilterExpanded = !_uiState.value.timeFilterExpanded)
     }
 
     fun updateMinProductivity(value: Int) {
@@ -169,18 +223,15 @@ class ReportConfigViewModel @Inject constructor(
         )
     }
 
-    // ReportConfigViewModel.kt
-    fun generateAndShare(activityContext: Context) {  // ← Recibe activityContext
+    fun generateAndShare(activityContext: Context) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isGenerating = true, error = null)
             try {
                 val config = _uiState.value.config
                 val activities = if (specificActivityId != null) {
-                    // Modo específico: obtener una sola actividad
                     val activity = dashboardRepository.getActivityDetails(specificActivityId!!)
                     if (activity != null) listOf(activity) else emptyList()
                 } else {
-                    // Modo general: validar empresa y aplicar filtros
                     if (config.companyId.isBlank()) {
                         throw Exception("Debe seleccionar una empresa")
                     }
@@ -195,7 +246,10 @@ class ReportConfigViewModel @Inject constructor(
                 shareReportUseCase(file, config.format, activityContext)
                 _uiState.value = _uiState.value.copy(isGenerating = false)
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isGenerating = false, error = e.message)
+                _uiState.value = _uiState.value.copy(
+                    isGenerating = false,
+                    error = e.message ?: "Error desconocido"
+                )
             }
         }
     }

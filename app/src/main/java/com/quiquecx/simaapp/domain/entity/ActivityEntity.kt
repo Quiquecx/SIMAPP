@@ -35,7 +35,20 @@ data class ActivityEntity(
     val estimadoCosto: String = "0",
 
     // Historial técnico (opcional si lo usas)
-    val timerHistory: List<TimerEntry> = emptyList()
+    val timerHistory: List<TimerEntry> = emptyList(),
+
+    // ✅ NUEVO: CAMPOS PARA REPORTES DETALLADOS
+    // Fechas importantes
+    val fechaIniciacion: Date? = null,      // Cuándo REALMENTE empezó
+    val fechaCompletacion: Date? = null,    // Cuándo se completó
+
+    // Desglose de trabajadores por día
+    val workerDailyBreakdown: List<DailyWorkerHours> = emptyList(),
+
+    // Análisis de costos
+    val costPerHour: Double = 0.0,
+    val totalLaborCost: Double = 0.0,
+    val costVariance: Double = 0.0
 )
 
 // --- ENTIDADES RELACIONADAS ---
@@ -44,7 +57,25 @@ data class WorkerEntity(
     val name: String = "",
     val isTimerActive: Boolean = false,
     val startTime: Timestamp? = null, // Usamos Timestamp para mejor compatibilidad con Firebase
-    val accumulatedHours: Double = 0.0
+    val accumulatedHours: Double = 0.0,
+    // ✅ NUEVO
+    val dailyHours: List<DailyHours> = emptyList()  // Desglose por día
+)
+
+// ✅ NUEVO: Estructura para horas por día
+data class DailyHours(
+    val date: Date,
+    val hoursWorked: Double = 0.0,
+    val tasksCompleted: Int = 0,
+    val defectsFound: Int = 0
+)
+
+// ✅ NUEVO: Desglose de trabajadores por día
+data class DailyWorkerHours(
+    val date: Date,
+    val workerName: String,
+    val hoursWorked: Double = 0.0,
+    val tasksCompleted: Int = 0
 )
 
 data class TimerEntry(
