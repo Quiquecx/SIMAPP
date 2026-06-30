@@ -5,6 +5,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -31,6 +33,7 @@ import com.quiquecx.simaapp.view.reports.ReportConfigScreen
 import java.text.SimpleDateFormat
 import java.util.*
 
+// Función auxiliar para convertir milisegundos a formato de reloj 00:00:00
 // Función auxiliar para convertir milisegundos a formato de reloj 00:00:00
 fun formatMillisToClock(millis: Long): String {
     val totalSeconds = millis / 1000
@@ -49,7 +52,6 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
     val isLoading by viewModel.isLoading.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    // Actualizamos las pestañas para incluir Reportes
     val tabs = listOf("General", "Calidad", "Personal", "Reportes")
 
     var showDeleteActivityDialog by remember { mutableStateOf(false) }
@@ -92,7 +94,7 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
                         0 -> GeneralDetailsTab(act, viewModel)
                         1 -> QualityControlTab(act, productivityLogs, viewModel) { logToDelete = it }
                         2 -> PersonnelTab(act, viewModel)
-                        3 -> ReportsTab(viewModel, history) // Nueva pestaña de reportes
+                        3 -> ReportsTab(viewModel, history)
                     }
                 }
             }
@@ -138,19 +140,17 @@ fun ActivityDetailsScreen(viewModel: ActivityDetailsViewModel, onBack: () -> Uni
 @Composable
 fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>) {
     val filteredLogs by viewModel.filteredLogs.collectAsState()
+    val context = LocalContext.current
 
-    // 0: Hoy, 1: 7D, 2: 30D, 3: Todo, 4: Personalizado
     var selectedFilter by remember { mutableIntStateOf(0) }
     var showTechnicalHistory by remember { mutableStateOf(false) }
 
-    // Estados para Material3 DatePickers
     val datePickerState = rememberDatePickerState()
     val dateRangePickerState = rememberDateRangePickerState()
     var showDatePicker by remember { mutableStateOf(false) }
     var showRangePicker by remember { mutableStateOf(false) }
     var customLabel by remember { mutableStateOf("Calendario") }
 
-    // Lógica de disparo de filtros
     LaunchedEffect(
         selectedFilter,
         datePickerState.selectedDateMillis,
@@ -163,16 +163,13 @@ fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>)
             2 -> { viewModel.filterProductivityByRange(30); customLabel = "Calendario" }
             3 -> { viewModel.filterProductivityByRange(null); customLabel = "Calendario" }
             4 -> {
-                // Si hay un rango seleccionado en el RangePicker
                 val startR = dateRangePickerState.selectedStartDateMillis
                 val endR = dateRangePickerState.selectedEndDateMillis
-
                 if (startR != null && endR != null) {
                     viewModel.filterProductivityByCustomRange(startR, endR)
                     val sdf = SimpleDateFormat("dd/MM", Locale.getDefault())
                     customLabel = "${sdf.format(Date(startR))} - ${sdf.format(Date(endR))}"
                 } else {
-                    // Si es solo un día en el DatePicker
                     datePickerState.selectedDateMillis?.let {
                         viewModel.filterProductivityByCustomRange(it, it)
                         val sdf = SimpleDateFormat("dd/MM/yy", Locale.getDefault())
@@ -184,24 +181,39 @@ fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>)
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        // Cabecera con alternancia de historial técnico
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth(),
+            Arrangement.SpaceBetween,
+            Alignment.CenterVertically
+        ) {
             Text(
                 if (showTechnicalHistory) "Historial Técnico" else "Reporte de Producción",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black
             )
-            IconButton(onClick = { showTechnicalHistory = !showTechnicalHistory }) {
-                Icon(
-                    if (showTechnicalHistory) Icons.Default.Assessment else Icons.Default.History,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
+            Row {
+                IconButton(
+                    onClick = { viewModel.generateReportWithCurrentFilters(context) }
+                ) {
+                    Icon(
+                        Icons.Default.Print,
+                        contentDescription = "Exportar reporte con los filtros actuales",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                IconButton(
+                    onClick = { showTechnicalHistory = !showTechnicalHistory }
+                ) {
+                    Icon(
+                        if (showTechnicalHistory) Icons.Default.Assessment else Icons.Default.History,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
         if (!showTechnicalHistory) {
-            // Barra de Filtros con Scroll Horizontal
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -219,7 +231,6 @@ fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>)
                         )
                     }
 
-                    // Chip de Calendario
                     FilterChip(
                         selected = selectedFilter == 4,
                         onClick = { showDatePicker = true },
@@ -227,10 +238,8 @@ fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>)
                         leadingIcon = { Icon(Icons.Default.DateRange, null, Modifier.size(16.dp)) }
                     )
                 }
-
             }
 
-            // Resumen de Totales
             val totalOk = filteredLogs.sumOf { it.cantidadOk }
             val totalDef = filteredLogs.sumOf { it.defectos.sumOf { d -> d.count } }
 
@@ -250,7 +259,6 @@ fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>)
                 }
             }
 
-            // Lista de Resultados
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (filteredLogs.isEmpty()) {
                     item {
@@ -260,6 +268,7 @@ fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>)
                     }
                 }
                 items(filteredLogs) { log ->
+                    // Aquí mandamos llamar la tarjeta con soporte para nombres
                     ProductivityLogItem(log, onDelete = {})
                 }
             }
@@ -269,37 +278,23 @@ fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>)
     }
 
     // --- DIÁLOGOS DE SELECCIÓN DE FECHA ---
-
-    // 1. Selector de Día Único
     if (showDatePicker) {
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
-                TextButton(onClick = {
-                    selectedFilter = 4
-                    showDatePicker = false
-                }) { Text("SELECCIONAR") }
+                TextButton(onClick = { selectedFilter = 4; showDatePicker = false }) { Text("SELECCIONAR") }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    showRangePicker = true
-                    showDatePicker = false
-                }) { Text("VER RANGO") }
+                TextButton(onClick = { showRangePicker = true; showDatePicker = false }) { Text("VER RANGO") }
             }
-        ) {
-            DatePicker(state = datePickerState)
-        }
+        ) { DatePicker(state = datePickerState) }
     }
 
-    // 2. Selector de Rango de Fechas
     if (showRangePicker) {
         DatePickerDialog(
             onDismissRequest = { showRangePicker = false },
             confirmButton = {
-                TextButton(onClick = {
-                    selectedFilter = 4
-                    showRangePicker = false
-                }) { Text("APLICAR RANGO") }
+                TextButton(onClick = { selectedFilter = 4; showRangePicker = false }) { Text("APLICAR RANGO") }
             },
             dismissButton = {
                 TextButton(onClick = { showRangePicker = false }) { Text("CANCELAR") }
@@ -314,11 +309,105 @@ fun ReportsTab(viewModel: ActivityDetailsViewModel, history: List<HistoryEntry>)
     }
 }
 
+// 👤 ✅ ESTA ES LA FUNCIÓN QUE DEBES AGREGAR PARA RENDERIZAR CADA RENGLÓN CON EL OPERADOR:
+@Composable
+fun ProductivityLogItem(
+    log: ProductivityEntity,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    val timeStr = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                        .format(log.timestamp.toDate())
+
+                    Text(
+                        text = "Registro - $timeStr hrs",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.Gray
+                    )
+
+                    // Si el log fue guardado desde el timer de un operador, pintamos su etiqueta
+                    if (log.workerName.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = androidx.compose.foundation.shape.CircleShape
+                        ) {
+                            Text(
+                                text = "👤 ${log.workerName}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("OK", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text("${log.cantidadOk} pzs", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        val totalDefectos = log.defectos.sumOf { it.count }
+                        Text("DEFECTOS", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text("$totalDefectos", fontWeight = FontWeight.Bold, color = if(totalDefectos > 0) Color.Red else Color.Gray)
+                    }
+                }
+            }
+
+            // Desglose de los defectos que el operador metió en la pausa
+            if (log.defectos.any { it.count > 0 }) {
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(4.dp))
+
+                log.defectos.filter { it.count > 0 }.forEach { defect ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("• ${defect.name}", style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
+                        Text("${defect.count} pzs", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = Color.Red)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // --- PESTAÑA: PERSONAL ---
 @Composable
 fun PersonnelTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) {
     var newPersonName by remember { mutableStateOf("") }
     val serverTime by viewModel.currentTime.collectAsState()
+
+    // Escuchar el historial de sesiones del operador
+    val workerSessions by viewModel.workerSessions.collectAsState()
+
+    var workerToPause by remember { mutableStateOf<WorkerEntity?>(null) }
+
+    // Estados para el flujo de diálogo encadenado
+    var showFlowDialog by remember { mutableStateOf(false) }
+    var currentStep by remember { mutableStateOf(1) } // 1: Total, 2: OK/No OK, 3: Defectos
+
+    var totalPiecesStr by remember { mutableStateOf("") }
+    var okPiecesStr by remember { mutableStateOf("") }
+    var noOkPiecesStr by remember { mutableStateOf("") }
+
+    // Lista local para gestionar los defectos que el operador va a declarar
+    var localDefectsList by remember { mutableStateOf(listOf<DefectEntry>()) }
 
     val totalHoursRunning = activity.workers.sumOf { worker ->
         val liveSession = if (worker.isTimerActive && worker.startTime != null) {
@@ -357,22 +446,200 @@ fun PersonnelTab(activity: ActivityEntity, viewModel: ActivityDetailsViewModel) 
             }
         )
         Spacer(Modifier.height(16.dp))
-        Text("Equipo en Planta", fontWeight = FontWeight.Bold)
+        Text("Equipo en Planta y Control de Rendimiento", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+
         LazyColumn(Modifier.weight(1f)) {
             items(activity.workers) { worker ->
+                // Calcular las piezas totales acumuladas por este operador sumando sus sesiones
+                val workerTotalPieces = workerSessions
+                    .filter { it.workerName == worker.name }
+                    .sumOf { it.piecesChecked }
+
                 WorkerItemRow(
                     worker = worker,
                     serverTime = serverTime,
-                    onToggle = { viewModel.toggleWorkerTimer(worker.name) },
+                    totalPiecesAccumulated = workerTotalPieces, // Aquí pasamos el valor numérico directamente
+                    onToggle = {
+                        if (!worker.isTimerActive) {
+                            // Si inicia el tiempo, corre directo
+                            viewModel.toggleWorkerTimer(worker.name)
+                        } else {
+                            // Inicializamos variables del flujo para pausar
+                            workerToPause = worker
+                            totalPiecesStr = ""
+                            okPiecesStr = ""
+                            noOkPiecesStr = ""
+                            currentStep = 1
+
+                            // Precargar los tipos de defectos ya existentes en Calidad puestos a 0
+                            localDefectsList = activity.defectos.map { it.copy(count = 0) }
+                            showFlowDialog = true
+                        }
+                    },
                     onDelete = { viewModel.removePersonFromActivity(worker) }
                 )
             }
         }
     }
+
+    // DIÁLOGO CON FLUJO INTEGRADO (CALIDAD + PERSONAL)
+    if (showFlowDialog && workerToPause != null) {
+        val totalInput = totalPiecesStr.toIntOrNull() ?: 0
+        val okInput = okPiecesStr.toIntOrNull() ?: 0
+        val noOkInput = noOkPiecesStr.toIntOrNull() ?: 0
+        val defectsAssignedSum = localDefectsList.sumOf { it.count }
+
+        AlertDialog(
+            onDismissRequest = { showFlowDialog = false; workerToPause = null },
+            title = { Text("Pausa: ${workerToPause?.name} (Paso $currentStep de ${if (noOkInput > 0) "3" else "2"})") },
+            text = {
+                Column(Modifier.fillMaxWidth()) {
+                    when (currentStep) {
+                        1 -> {
+                            Text("1. ¿Cuántas piezas totales revisó en este periodo?", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = totalPiecesStr,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) totalPiecesStr = it },
+                                label = { Text("Total de Piezas") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        2 -> {
+                            Text("Piezas Totales Declaradas: $totalInput", fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(12.dp))
+                            Text("2. Desglose de Calidad (Buenas vs Malas):", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(8.dp))
+
+                            OutlinedTextField(
+                                value = okPiecesStr,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) okPiecesStr = it },
+                                label = { Text("Cantidad OK (Buenas)") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = noOkPiecesStr,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) noOkPiecesStr = it },
+                                label = { Text("Cantidad NO OK (Defectos/Malas)") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // Alerta visual si la suma no cuadra con el total ingresado en el paso 1
+                            if (okInput + noOkInput != totalInput) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = "La suma (${okInput + noOkInput}) debe ser igual al total ($totalInput).",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                        3 -> {
+                            Text("Piezas Defectuosas a declarar: $noOkInput", fontWeight = FontWeight.Bold)
+                            Text("Faltan por asignar: ${noOkInput - defectsAssignedSum}", color = if (noOkInput == defectsAssignedSum) Color.Unspecified else MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.height(8.dp))
+                            Text("Selecciona los defectos correspondientes a esta producción:")
+                            Spacer(Modifier.height(8.dp))
+
+                            if (localDefectsList.isEmpty()) {
+                                Text("No hay tipos de defectos agregados en la pantalla de calidad.", style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic)
+                            } else {
+                                LazyColumn(modifier = Modifier.heightIn(max = 250.dp)) {
+                                    itemsIndexed(localDefectsList) { index, defect ->
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(defect.name, Modifier.weight(1f), maxLines = 1)
+                                            IconButton(onClick = {
+                                                if (defect.count > 0) {
+                                                    localDefectsList = localDefectsList.toMutableList().apply {
+                                                        this[index] = defect.copy(count = defect.count - 1)
+                                                    }
+                                                }
+                                            }) { Icon(Icons.Default.Remove, null) }
+
+                                            Text("${defect.count}", modifier = Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Bold)
+
+                                            IconButton(onClick = {
+                                                if (defectsAssignedSum < noOkInput) {
+                                                    localDefectsList = localDefectsList.toMutableList().apply {
+                                                        this[index] = defect.copy(count = defect.count + 1)
+                                                    }
+                                                }
+                                            }) { Icon(Icons.Default.Add, null) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = when (currentStep) {
+                        1 -> totalInput > 0
+                        2 -> (okInput + noOkInput == totalInput)
+                        3 -> defectsAssignedSum == noOkInput
+                        else -> false
+                    },
+                    onClick = {
+                        if (currentStep == 1) {
+                            currentStep = 2
+                        } else if (currentStep == 2) {
+                            if (noOkInput > 0) {
+                                currentStep = 3 // Si hay malas, vamos a capturar defectos
+                            } else {
+                                // Si todo fue OK, mandamos directo al ViewModel sin defectos
+                                viewModel.toggleWorkerTimer(workerToPause!!.name, okInput, 0, emptyList())
+                                showFlowDialog = false
+                                workerToPause = null
+                            }
+                        } else if (currentStep == 3) {
+                            // Finalizamos guardando todo sincronizado
+                            viewModel.toggleWorkerTimer(workerToPause!!.name, okInput, noOkInput, localDefectsList)
+                            showFlowDialog = false
+                            workerToPause = null
+                        }
+                    }
+                ) {
+                    Text(if (currentStep == 2 && noOkInput == 0 || currentStep == 3) "FINALIZAR Y PAUSAR" else "SIGUIENTE")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    if (currentStep > 1) {
+                        currentStep-- // Permitir regresar un paso atrás
+                    } else {
+                        showFlowDialog = false
+                        workerToPause = null
+                    }
+                }) {
+                    Text(if (currentStep == 1) "CANCELAR" else "ATRÁS")
+                }
+            }
+        )
+    }
 }
 
 @Composable
-fun WorkerItemRow(worker: WorkerEntity, serverTime: Long, onToggle: () -> Unit, onDelete: () -> Unit) {
+fun WorkerItemRow(
+    worker: WorkerEntity,
+    serverTime: Long,
+    totalPiecesAccumulated: Int, // El nuevo parámetro que añadimos
+    onToggle: () -> Unit,
+    onDelete: () -> Unit
+) {
+    // 1. !!! ELIMINA LA LÍNEA QUE DICE TODO() SI ESTÁ AQUÍ !!!
+
     val cardColor by animateColorAsState(
         if (worker.isTimerActive) Color(0xFFE8F5E9) else MaterialTheme.colorScheme.surface, label = ""
     )
@@ -408,11 +675,20 @@ fun WorkerItemRow(worker: WorkerEntity, serverTime: Long, onToggle: () -> Unit, 
                             )
                         }
                     }
-                    Text(
-                        text = "Total: ${String.format("%.4f", totalHoursDecimal)} hrs",
-                        fontSize = 12.sp,
-                        color = if(worker.isTimerActive) Color(0xFF2E7D32) else Color.Gray
-                    )
+                    Column {
+                        Text(
+                            text = "Total: ${String.format("%.4f", totalHoursDecimal)} hrs",
+                            fontSize = 12.sp,
+                            color = if(worker.isTimerActive) Color(0xFF2E7D32) else Color.Gray
+                        )
+                        // AQUÍ PINTAMOS EL TOTAL SINCRONIZADO:
+                        Text(
+                            text = "Revisadas: $totalPiecesAccumulated pzs",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
             IconButton(onClick = onToggle) {
@@ -774,20 +1050,3 @@ fun HistoryTab(history: List<HistoryEntry>) {
     }
 }
 
-@Composable
-fun ProductivityLogItem(log: ProductivityEntity, onDelete: () -> Unit) {
-    val sdf = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Badge { Text(log.turno) }
-                Text(sdf.format(log.timestamp.toDate()), fontSize = 11.sp, color = Color.Gray)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("${log.cantidadOk} OK", fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
-                Text("${log.defectos.sumOf { it.count }} DEF", fontSize = 11.sp, color = Color.Red)
-            }
-            IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, null, tint = Color.Gray, modifier = Modifier.size(20.dp)) }
-        }
-    }
-}

@@ -6,6 +6,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
 import com.quiquecx.simaapp.domain.entity.*
 import com.quiquecx.simaapp.domain.repository.DashboardRepository
 import com.quiquecx.simaapp.domain.useCase.*
@@ -14,6 +16,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.util.*
 import javax.inject.Inject
 
@@ -27,6 +30,7 @@ class ReportConfigViewModel @Inject constructor(
     private val generateReportUseCase: GenerateReportUseCase,
     private val shareReportUseCase: ShareReportUseCase,
     private val dashboardRepository: DashboardRepository,
+    private val firestore: FirebaseFirestore,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -38,7 +42,6 @@ class ReportConfigViewModel @Inject constructor(
         val selectedProjectName: String = "Todos los proyectos",
         val companyMenuExpanded: Boolean = false,
         val projectMenuExpanded: Boolean = false,
-        // ✅ NUEVO: Campos para filtro de tiempo
         val timeFilterExpanded: Boolean = false,
         val selectedTimeFilter: TimeFilter = TimeFilter.ALL,
         val isGenerating: Boolean = false,
@@ -117,7 +120,6 @@ class ReportConfigViewModel @Inject constructor(
         )
     }
 
-    // ✅ NUEVO: Manejo de filtros de tiempo
     fun selectTimeFilter(filter: TimeFilter) {
         val (startDate, endDate) = when (filter) {
             TimeFilter.TODAY -> {
@@ -153,7 +155,6 @@ class ReportConfigViewModel @Inject constructor(
                 Pair(null, null)
             }
             TimeFilter.CUSTOM -> {
-                // No cambiar fechas si es personalizado
                 return
             }
         }
@@ -239,10 +240,51 @@ class ReportConfigViewModel @Inject constructor(
                 }
 
                 if (activities.isEmpty()) {
-                    throw Exception("No se encontró la actividad con ID: $specificActivityId")
+                    val errorMsg = if (specificActivityId != null) {
+                        "No se encontró la actividad con ID: $specificActivityId"
+                    } else {
+                        "No se encontraron actividades para los filtros seleccionados"
+                    }
+                    throw Exception(errorMsg)
                 }
 
-                val file = generateReportUseCase(activities, config)
+                // ✅ OBTENER WORKER_SESSIONS (NO productivity_logs)
+                val activitySessionsMap = mutableMapOf<String, List<WorkerSessionLog>>()
+
+                activities.forEach { activity ->
+                    try {
+                        var query = firestore.collection("activities")
+                            .document(activity.id)
+                            .collection("worker_sessions")
+                            .orderBy("timestamp", Query.Direction.ASCENDING)
+
+                        // Aplicar filtros de fecha
+                        config.startDate?.let {
+                            query = query.whereGreaterThanOrEqualTo("timestamp", it)
+                        }
+                        config.endDate?.let {
+                            query = query.whereLessThanOrEqualTo("timestamp", it)
+                        }
+
+                        val snapshot = query.get().await()
+                        val sessions = snapshot.documents.mapNotNull { doc ->
+                            doc.toObject(WorkerSessionLog::class.java)?.copy(id = doc.id)
+                        }
+                        android.util.Log.d("ReportConfigVM", "Activity ${activity.id} - Sesiones encontradas: ${sessions.size}")
+                        activitySessionsMap[activity.id] = sessions
+                    } catch (e: Exception) {
+                        android.util.Log.e("ReportConfigVM", "Error obteniendo worker_sessions para ${activity.id}", e)
+                        activitySessionsMap[activity.id] = emptyList()
+                    }
+                }
+
+                // ✅ PASAR WORKER_SESSIONS AL GENERADOR
+                val file = generateReportUseCase(
+                    activities = activities,
+                    config = config,
+                    activitySessions = activitySessionsMap
+                )
+
                 shareReportUseCase(file, config.format, activityContext)
                 _uiState.value = _uiState.value.copy(isGenerating = false)
             } catch (e: Exception) {
@@ -250,6 +292,7 @@ class ReportConfigViewModel @Inject constructor(
                     isGenerating = false,
                     error = e.message ?: "Error desconocido"
                 )
+                android.util.Log.e("ReportConfigVM", "Error generando reporte", e)
             }
         }
     }

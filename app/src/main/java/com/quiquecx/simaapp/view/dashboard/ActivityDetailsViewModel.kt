@@ -1,5 +1,6 @@
 package com.quiquecx.simaapp.view.dashboard
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.SavedStateHandle
@@ -11,6 +12,8 @@ import com.google.firebase.firestore.Query
 import com.quiquecx.simaapp.data.model.ActivityDto
 import com.quiquecx.simaapp.data.model.WorkerDto
 import com.quiquecx.simaapp.domain.entity.*
+import com.quiquecx.simaapp.domain.useCase.GenerateReportUseCase
+import com.quiquecx.simaapp.domain.useCase.ShareReportUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +31,8 @@ import javax.inject.Inject
 class ActivityDetailsViewModel @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val auth: FirebaseAuth,
+    private val generateReportUseCase: GenerateReportUseCase,
+    private val shareReportUseCase: ShareReportUseCase,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -52,6 +57,9 @@ class ActivityDetailsViewModel @Inject constructor(
     private val _filteredLogs = MutableStateFlow<List<ProductivityEntity>>(emptyList())
     val filteredLogs: StateFlow<List<ProductivityEntity>> = _filteredLogs.asStateFlow()
 
+    private val _workerSessions = MutableStateFlow<List<WorkerSessionLog>>(emptyList())
+    val workerSessions: StateFlow<List<WorkerSessionLog>> = _workerSessions.asStateFlow()
+
     private val currentUser get() = auth.currentUser
     private val currentUserName get() = currentUser?.email ?: "Desconocido"
 
@@ -59,11 +67,15 @@ class ActivityDetailsViewModel @Inject constructor(
         URLDecoder.decode(it, "utf-8")
     }
 
+    private var currentFilterStartDate: Date? = null
+    private var currentFilterEndDate: Date? = null
+
     init {
         activityId?.let { id ->
             fetchActivityDetailsStream(id)
             fetchActivityHistory(id)
             fetchProductivityLogs(id)
+            fetchWorkerSessions(id)
             startClockTicker()
         }
     }
@@ -97,10 +109,21 @@ class ActivityDetailsViewModel @Inject constructor(
             }
     }
 
+    fun fetchWorkerSessions(id: String) {
+        firestore.collection("activities").document(id).collection("worker_sessions")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, _ ->
+                _workerSessions.value = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(WorkerSessionLog::class.java)?.copy(id = doc.id)
+                } ?: emptyList()
+            }
+    }
+
     // --- GESTIÓN DE PERSONAL ---
 
     fun addPersonToActivity(name: String) {
         val id = activityId ?: return
+        // Asegúrate de que WorkerDto soporte el nuevo parámetro opcional si lo deseas mapear directo, o manéjalo dinámicamente.
         val newWorker = WorkerDto(name = name, isTimerActive = false)
         firestore.collection("activities").document(id)
             .update("workers", FieldValue.arrayUnion(newWorker))
@@ -112,19 +135,67 @@ class ActivityDetailsViewModel @Inject constructor(
             .update("workers", FieldValue.arrayRemove(WorkerDto.fromEntity(worker)))
     }
 
-    fun toggleWorkerTimer(workerName: String) {
+    fun toggleWorkerTimer(
+        workerName: String,
+        piecesOk: Int = 0,
+        piecesNoOk: Int = 0,
+        sessionDefects: List<DefectEntry> = emptyList()
+    ) {
         val id = activityId ?: return
         val currentAct = _activity.value ?: return
         val worker = currentAct.workers.find { it.name == workerName } ?: return
         val now = Timestamp.now()
+        val totalSessionPieces = piecesOk + piecesNoOk
 
         val updatedWorkers = currentAct.workers.map { w ->
             if (w.name == workerName) {
                 if (!w.isTimerActive) {
+                    // INICIAR TIEMPO
                     w.copy(isTimerActive = true, startTime = now)
                 } else {
+                    // PAUSAR TIEMPO
                     val startMs = w.startTime?.toDate()?.time ?: now.toDate().time
                     val diffHours = (now.toDate().time - startMs).toDouble() / 3600000.0
+
+                    // 1. Guardar log individual de la sesión detallada
+                    val sessionLog = mapOf(
+                        "workerName" to workerName,
+                        "timestamp" to now,
+                        "durationHours" to diffHours,
+                        "piecesChecked" to totalSessionPieces,
+                        "piecesOk" to piecesOk,
+                        "piecesNoOk" to piecesNoOk,
+                        "defectos" to sessionDefects.filter { it.count > 0 },
+                        "dia" to SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                    )
+
+                    viewModelScope.launch {
+                        // Guardar la sesión del trabajador
+                        firestore.collection("activities").document(id)
+                            .collection("worker_sessions").add(sessionLog)
+
+                        // 🌟 ¡NUEVO! CREAR EL LOG DE PRODUCTIVIDAD ASOCIADO PARA REPORTE Y CALIDAD
+                        val productivityLog = mapOf(
+                            "timestamp" to now,
+                            "dia" to SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+                            "turno" to "Único", // Puedes cambiarlo dinámicamente si manejas turnos
+                            "cantidadOk" to piecesOk,
+                            "defectos" to sessionDefects.filter { it.count > 0 },
+                            "registradoPor" to "Sistema - Operador",
+                            "workerName" to workerName // Aquí amarra con el ProductivityLogItem que creamos
+                        )
+
+                        // Al añadirlo aquí, se reflejará de inmediato en la pestaña Reportes
+                        firestore.collection("activities").document(id)
+                            .collection("productivity_logs").add(productivityLog)
+
+                        addHistoryEntry(
+                            field = "Producción Operador ($workerName)",
+                            oldValue = "Pausa tiempo",
+                            newValue = "$totalSessionPieces pzs total ($piecesOk OK, $piecesNoOk No OK) en ${String.format("%.2f", diffHours)} hrs"
+                        )
+                    }
+
                     w.copy(
                         isTimerActive = false,
                         startTime = null,
@@ -134,7 +205,40 @@ class ActivityDetailsViewModel @Inject constructor(
             } else w
         }.map { WorkerDto.fromEntity(it) }
 
-        firestore.collection("activities").document(id).update("workers", updatedWorkers)
+        // Si el temporizador estaba activo, significa que estamos pausando e impactando la Pantalla de Calidad Global
+        if (worker.isTimerActive) {
+            val totalOkGlobal = currentAct.cantidadOk + piecesOk
+            val listaDefectosGlobalActualizada = currentAct.defectos.toMutableList()
+
+            // Fusionar los defectos reportados por este operador con el acumulado de la actividad
+            sessionDefects.forEach { capture ->
+                if (capture.count > 0) {
+                    val index = listaDefectosGlobalActualizada.indexOfFirst { it.name.equals(capture.name, ignoreCase = true) }
+                    if (index != -1) {
+                        val existing = listaDefectosGlobalActualizada[index]
+                        listaDefectosGlobalActualizada[index] = existing.copy(count = existing.count + capture.count)
+                    } else {
+                        listaDefectosGlobalActualizada.add(capture)
+                    }
+                }
+            }
+
+            val totalNoOkGlobal = listaDefectosGlobalActualizada.sumOf { it.count }
+            val progress = calculateProgress(totalOkGlobal, totalNoOkGlobal, currentAct.cantidadTotal)
+            val nuevoEstado = if (totalOkGlobal + totalNoOkGlobal >= currentAct.cantidadTotal && currentAct.cantidadTotal > 0) "Finalizado" else "En curso"
+
+            val updates = mapOf(
+                "workers" to updatedWorkers,
+                "cantidadOk" to totalOkGlobal,
+                "defectos" to listaDefectosGlobalActualizada,
+                "cantidadNoOk" to totalNoOkGlobal,
+                "progreso" to progress,
+                "estado" to nuevoEstado
+            )
+            updateFirestoreFields(updates)
+        } else {
+            firestore.collection("activities").document(id).update("workers", updatedWorkers)
+        }
     }
 
     // --- CALIDAD Y PRODUCCIÓN ---
@@ -161,7 +265,6 @@ class ActivityDetailsViewModel @Inject constructor(
         val totalNoOkAcumulado = listaDefectosActualizada.sumOf { it.count }
         val progress = calculateProgress(totalOkAcumulado, totalNoOkAcumulado, current.cantidadTotal)
 
-        // --- LÓGICA DE ESTADO AÑADIDA AQUÍ ---
         val totalProcesado = totalOkAcumulado + totalNoOkAcumulado
         val nuevoEstado = if (totalProcesado >= current.cantidadTotal && current.cantidadTotal > 0) "Finalizado" else "En curso"
 
@@ -178,7 +281,6 @@ class ActivityDetailsViewModel @Inject constructor(
             firestore.collection("activities").document(id).collection("productivity_logs").add(log)
             addHistoryEntry("Producción ($turno)", "${current.cantidadOk} OK", "$totalOkAcumulado OK")
 
-            // Registrar cambio de estado si ocurre
             if (current.estado != nuevoEstado) {
                 addHistoryEntry("Estado", current.estado, nuevoEstado)
             }
@@ -188,7 +290,7 @@ class ActivityDetailsViewModel @Inject constructor(
                 "defectos" to listaDefectosActualizada,
                 "cantidadNoOk" to totalNoOkAcumulado,
                 "progreso" to progress,
-                "estado" to nuevoEstado // <--- AHORA SÍ SE ACTUALIZA
+                "estado" to nuevoEstado
             ))
         }
     }
@@ -199,11 +301,8 @@ class ActivityDetailsViewModel @Inject constructor(
         val totalNoOk = defects.sumOf { it.count }
         val progress = calculateProgress(newOkTotal, totalNoOk, current.cantidadTotal)
 
-        // LÓGICA DE ESTADO AUTOMÁTICO
-        // Si el progreso es 100 o más, es Finalizado, de lo contrario sigue En curso
         val nuevoEstado = if (progress >= 100) "Finalizado" else "En curso"
 
-        // BUG FIX: Registrar ajuste manual si hubo cambios
         if (current.cantidadOk != newOkTotal) {
             addHistoryEntry("Ajuste Manual OK", "${current.cantidadOk}", "$newOkTotal")
         }
@@ -211,7 +310,6 @@ class ActivityDetailsViewModel @Inject constructor(
             addHistoryEntry("Ajuste Manual No OK", "${current.cantidadNoOk}", "$totalNoOk")
         }
 
-        // Registrar cambio de estado en el historial si cambió automáticamente
         if (current.estado != nuevoEstado) {
             addHistoryEntry("Estado", current.estado, nuevoEstado)
         }
@@ -221,7 +319,7 @@ class ActivityDetailsViewModel @Inject constructor(
             "defectos" to defects,
             "cantidadNoOk" to totalNoOk,
             "progreso" to progress,
-            "estado" to nuevoEstado // <--- Esto actualiza el campo en Firestore
+            "estado" to nuevoEstado
         ))
     }
 
@@ -231,8 +329,6 @@ class ActivityDetailsViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                // Al eliminar un log, debemos recalcular el progreso y estado
-                // ya que la cantidad total de OK bajará
                 val nuevaCantidadOk = (current.cantidadOk - log.cantidadOk).coerceAtLeast(0)
                 val nuevoProgreso = calculateProgress(nuevaCantidadOk, current.cantidadNoOk, current.cantidadTotal)
                 val nuevoEstado = if (nuevoProgreso >= 100) "Finalizado" else "En curso"
@@ -240,7 +336,6 @@ class ActivityDetailsViewModel @Inject constructor(
                 firestore.collection("activities").document(id)
                     .collection("productivity_logs").document(log.id).delete()
 
-                // Actualizamos la actividad principal para que el estado sea coherente con la eliminación
                 updateFirestoreFields(mapOf(
                     "cantidadOk" to nuevaCantidadOk,
                     "progreso" to nuevoProgreso,
@@ -261,7 +356,6 @@ class ActivityDetailsViewModel @Inject constructor(
     fun updateGeneralDetails(cantidadTotal: Int, estHoras: String, estCosto: String, nota: String, cpm: String) {
         val current = _activity.value ?: return
 
-        // BUG FIX: Registrar cambios en la planificación
         if (current.cantidadTotal != cantidadTotal) {
             addHistoryEntry("Cambio Lote Total", "${current.cantidadTotal}", "$cantidadTotal")
         }
@@ -354,30 +448,23 @@ class ActivityDetailsViewModel @Inject constructor(
             }
     }
 
-// --- REPORTES Y FILTRADO ---
+    // --- REPORTES Y FILTRADO ---
 
-    /**
-     * Filtra por periodos rápidos (Hoy, 7 días, 30 días o Todo)
-     */
     fun filterProductivityByRange(daysBack: Int?) {
         val id = activityId ?: return
         val calendar = Calendar.getInstance()
 
-        // Fin del rango: hoy al final del día
         calendar.set(Calendar.HOUR_OF_DAY, 23)
         calendar.set(Calendar.MINUTE, 59)
         calendar.set(Calendar.SECOND, 59)
         val endDate = calendar.time
 
-        // Inicio del rango
         if (daysBack != null) {
-            // Si daysBack es 0, resta 0 días (se queda hoy), si es 7, resta 7 días
             calendar.add(Calendar.DAY_OF_YEAR, -daysBack)
             calendar.set(Calendar.HOUR_OF_DAY, 0)
             calendar.set(Calendar.MINUTE, 0)
             calendar.set(Calendar.SECOND, 0)
         } else {
-            // Filtro total: desde el inicio de los tiempos
             calendar.set(2020, 0, 1)
         }
         val startDate = calendar.time
@@ -385,13 +472,9 @@ class ActivityDetailsViewModel @Inject constructor(
         executeProductivityQuery(id, startDate, endDate)
     }
 
-    /**
-     * Filtra por una selección específica del calendario (Día único o Rango)
-     */
     fun filterProductivityByCustomRange(startMillis: Long, endMillis: Long) {
         val id = activityId ?: return
 
-        // Ajustar inicio al primer segundo del día seleccionado
         val startCal = Calendar.getInstance().apply {
             timeInMillis = startMillis
             set(Calendar.HOUR_OF_DAY, 0)
@@ -400,7 +483,6 @@ class ActivityDetailsViewModel @Inject constructor(
             set(Calendar.MILLISECOND, 0)
         }
 
-        // Ajustar fin al último segundo del día seleccionado
         val endCal = Calendar.getInstance().apply {
             timeInMillis = endMillis
             set(Calendar.HOUR_OF_DAY, 23)
@@ -412,10 +494,10 @@ class ActivityDetailsViewModel @Inject constructor(
         executeProductivityQuery(id, startCal.time, endCal.time)
     }
 
-    /**
-     * Función interna para evitar repetir la lógica de Firestore
-     */
     private fun executeProductivityQuery(id: String, startDate: Date, endDate: Date) {
+        currentFilterStartDate = startDate
+        currentFilterEndDate = endDate
+
         firestore.collection("activities").document(id)
             .collection("productivity_logs")
             .whereGreaterThanOrEqualTo("timestamp", Timestamp(startDate))
@@ -431,5 +513,62 @@ class ActivityDetailsViewModel @Inject constructor(
                     entity?.copy(id = doc.id)
                 } ?: emptyList()
             }
+
+        firestore.collection("activities").document(id)
+            .collection("worker_sessions")
+            .whereGreaterThanOrEqualTo("timestamp", Timestamp(startDate))
+            .whereLessThanOrEqualTo("timestamp", Timestamp(endDate))
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, _ ->
+                _workerSessions.value = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(WorkerSessionLog::class.java)?.copy(id = doc.id)
+                } ?: emptyList()
+            }
+    }
+
+    fun generateReportWithCurrentFilters(context: Context) {
+        viewModelScope.launch {
+            val activity = _activity.value
+            if (activity == null) {
+                _error.value = "No hay actividad seleccionada"
+                return@launch
+            }
+
+            android.util.Log.d("REPORT_DEBUG", "Fechas guardadas - start: $currentFilterStartDate, end: $currentFilterEndDate")
+
+            val startTimestamp = currentFilterStartDate?.let { Timestamp(it) }
+            val endTimestamp = currentFilterEndDate?.let { Timestamp(it) }
+
+            val config = ReportConfig(
+                activityId = activity.id,
+                startDate = startTimestamp,
+                endDate = endTimestamp,
+                includeGeneralInfo = true,
+                includeWorkers = true,
+                includeDefects = true,
+                includeProductivity = true,
+                includeHistory = true,
+                format = ReportFormat.PDF
+            )
+
+            try {
+                // ✅ OBTENER WORKER_SESSIONS DE LA ACTIVIDAD (ya están en _workerSessions)
+                val workerSessions = _workerSessions.value
+                android.util.Log.d("REPORT_DEBUG", "Sesiones encontradas: ${workerSessions.size}")
+
+                // ✅ PASAR LAS SESIONES AL GENERADOR
+                val activitySessionsMap = mapOf(activity.id to workerSessions)
+
+                val file = generateReportUseCase(
+                    activities = listOf(activity),
+                    config = config,
+                    activitySessions = activitySessionsMap
+                )
+                shareReportUseCase(file, config.format, context)
+            } catch (e: Exception) {
+                _error.value = "Error al generar reporte: ${e.message}"
+                android.util.Log.e("REPORT_DEBUG", "Error: ${e.message}", e)
+            }
+        }
     }
 }

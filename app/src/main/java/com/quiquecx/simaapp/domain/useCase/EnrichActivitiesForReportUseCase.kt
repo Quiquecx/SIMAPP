@@ -1,34 +1,42 @@
 package com.quiquecx.simaapp.domain.useCase
 
-import com.quiquecx.simaapp.domain.entity.ActivityEntity
-import com.quiquecx.simaapp.domain.entity.DailyHours
-import com.quiquecx.simaapp.domain.entity.DailyWorkerHours
-import com.quiquecx.simaapp.domain.repository.DashboardRepository
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
-import com.quiquecx.simaapp.domain.entity.TimerEntry
+import com.google.firebase.firestore.Query
+import com.quiquecx.simaapp.domain.entity.*
+import com.quiquecx.simaapp.domain.repository.DashboardRepository
 import kotlinx.coroutines.tasks.await
 import java.util.*
 import javax.inject.Inject
 
 /**
  * UseCase que enriquece actividades con datos reales de productivity_logs e history
- * Calcula horas reales por trabajador, historial completo, y produktividad exacta
+ * Calcula horas reales por trabajador, historial completo, y productividad exacta
  */
 class EnrichActivitiesForReportUseCase @Inject constructor(
     private val dashboardRepository: DashboardRepository,
     private val firestore: FirebaseFirestore
 ) {
 
-    suspend operator fun invoke(activities: List<ActivityEntity>): List<ActivityEntity> {
+    suspend operator fun invoke(
+        activities: List<ActivityEntity>,
+        startDate: Date? = null,
+        endDate: Date? = null
+    ): List<ActivityEntity> {
         return activities.map { activity ->
-            enrichActivity(activity)
+            enrichActivity(activity, startDate, endDate)
         }
     }
 
-    private suspend fun enrichActivity(activity: ActivityEntity): ActivityEntity {
+    private suspend fun enrichActivity(
+        activity: ActivityEntity,
+        startDate: Date?,
+        endDate: Date?
+    ): ActivityEntity {
         try {
-            val productivityLogs = getProductivityLogs(activity.id)
-            val historyEntries = getHistoryEntries(activity.id)
+            // Obtener logs filtrando por rango de fechas si está definido
+            val productivityLogs = getProductivityLogs(activity.id, startDate, endDate)
+            val historyEntries = getHistoryEntries(activity.id, startDate, endDate)
 
             // Calcular desglose diario (solo para mostrar, sin reemplazar horas reales)
             val workerDailyBreakdown = calculateWorkerDailyHours(activity, productivityLogs)
@@ -39,23 +47,23 @@ class EnrichActivitiesForReportUseCase @Inject constructor(
                 val dailyHours = workerLogs.map { log ->
                     DailyHours(
                         date = log.date,
-                        hoursWorked = log.hoursWorked,      // Este es estimado, pero solo visual
+                        hoursWorked = log.hoursWorked,      // Estimado visual, no afecta horas reales
                         tasksCompleted = log.tasksCompleted,
                         defectsFound = 0
                     )
                 }
-                // ✅ Mantener accumulatedHours original (real)
+                // Mantener accumulatedHours original (real)
                 worker.copy(
                     dailyHours = dailyHours,
-                    accumulatedHours = worker.accumulatedHours  // ← conservar valor real
+                    accumulatedHours = worker.accumulatedHours
                 )
             }
 
-            // ✅ Horas acumuladas totales reales (suma de los accumulatedHours originales)
+            // Horas acumuladas totales reales (suma de los accumulatedHours originales)
             val realTotalHours = enrichedWorkers.sumOf { it.accumulatedHours }
 
             return activity.copy(
-                horasAcumuladas = realTotalHours,  // ← usar el valor real
+                horasAcumuladas = realTotalHours,
                 workers = enrichedWorkers,
                 workerDailyBreakdown = workerDailyBreakdown,
                 timerHistory = historyEntries.map { entry ->
@@ -72,24 +80,56 @@ class EnrichActivitiesForReportUseCase @Inject constructor(
         }
     }
 
-    private suspend fun getProductivityLogs(activityId: String): List<Map<String, Any>> {
+    private suspend fun getProductivityLogs(
+        activityId: String,
+        startDate: Date?,
+        endDate: Date?
+    ): List<Map<String, Any>> {
         return try {
-            val snapshot = firestore.collection("activities").document(activityId)
+            // 🔹 LOG 1: Ver las fechas que se usan para filtrar
+            android.util.Log.d("ENRICH", "Filtrando logs desde startDate=$startDate hasta endDate=$endDate")
+
+            var query = firestore.collection("activities").document(activityId)
                 .collection("productivity_logs")
-                .get()
-                .await()
+                .orderBy("timestamp", Query.Direction.ASCENDING)
+
+            if (startDate != null) {
+                query = query.whereGreaterThanOrEqualTo("timestamp", Timestamp(startDate))
+            }
+            if (endDate != null) {
+                query = query.whereLessThanOrEqualTo("timestamp", Timestamp(endDate))
+            }
+
+            val snapshot = query.get().await()
+
+            // 🔹 LOG 2: Cuántos documentos se obtuvieron
+            android.util.Log.d("ENRICH", "Se encontraron ${snapshot.documents.size} productivity_logs en el rango")
+
             snapshot.documents.map { it.data ?: emptyMap() }
         } catch (e: Exception) {
+            android.util.Log.e("ENRICH", "Error obteniendo productivity_logs", e)
             emptyList()
         }
     }
 
-    private suspend fun getHistoryEntries(activityId: String): List<Map<String, Any>> {
+    private suspend fun getHistoryEntries(
+        activityId: String,
+        startDate: Date?,
+        endDate: Date?
+    ): List<Map<String, Any>> {
         return try {
-            val snapshot = firestore.collection("activities").document(activityId)
+            var query = firestore.collection("activities").document(activityId)
                 .collection("history")
-                .get()
-                .await()
+                .orderBy("timestamp", Query.Direction.ASCENDING)
+
+            if (startDate != null) {
+                query = query.whereGreaterThanOrEqualTo("timestamp", Timestamp(startDate))
+            }
+            if (endDate != null) {
+                query = query.whereLessThanOrEqualTo("timestamp", Timestamp(endDate))
+            }
+
+            val snapshot = query.get().await()
             snapshot.documents.map { it.data ?: emptyMap() }
         } catch (e: Exception) {
             emptyList()
@@ -102,19 +142,17 @@ class EnrichActivitiesForReportUseCase @Inject constructor(
     ): List<DailyWorkerHours> {
         val result = mutableListOf<DailyWorkerHours>()
 
-        // Procesar cada log de productividad
         productivityLogs.forEach { log ->
             val registradoPor = (log["registradoPor"] as? String) ?: "Desconocido"
             val timestamp = log["timestamp"]
             val cantidadOk = (log["cantidadOk"] as? Number)?.toInt() ?: 0
 
             val date = when (timestamp) {
-                is com.google.firebase.Timestamp -> timestamp.toDate()
+                is Timestamp -> timestamp.toDate()
                 is Date -> timestamp
                 else -> Date()
             }
 
-            // Buscar si ya existe una entrada para este trabajador en este día
             val dayKey = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(date)
             val existing = result.find {
                 it.workerName == registradoPor &&
@@ -122,29 +160,27 @@ class EnrichActivitiesForReportUseCase @Inject constructor(
             }
 
             if (existing != null) {
-                // Actualizar entrada existente
                 val index = result.indexOf(existing)
                 result[index] = existing.copy(
                     tasksCompleted = existing.tasksCompleted + cantidadOk,
                     hoursWorked = existing.hoursWorked + estimateHours(cantidadOk)
                 )
             } else {
-                // Crear nueva entrada
-                result.add(DailyWorkerHours(
-                    date = date,
-                    workerName = registradoPor,
-                    hoursWorked = estimateHours(cantidadOk),
-                    tasksCompleted = cantidadOk
-                ))
+                result.add(
+                    DailyWorkerHours(
+                        date = date,
+                        workerName = registradoPor,
+                        hoursWorked = estimateHours(cantidadOk),
+                        tasksCompleted = cantidadOk
+                    )
+                )
             }
         }
-
         return result
     }
 
     private fun estimateHours(tasksCompleted: Int): Double {
-        // Estimación: si se completaron X tareas, asumir Y horas
-        // Ajusta según tu lógica de negocio (ej: 10 tareas = 1 hora)
+        // Estimación visual: 10 tareas = 1 hora (ajustable según negocio)
         return (tasksCompleted / 10.0).coerceAtLeast(0.0)
     }
 }

@@ -2,11 +2,12 @@ package com.quiquecx.simaapp.domain.useCase
 
 import com.quiquecx.simaapp.domain.entity.ActivityEntity
 import com.quiquecx.simaapp.domain.entity.ReportConfig
-import java.io.File
-import com.quiquecx.simaapp.utils.HtmlGenerator
+import com.quiquecx.simaapp.domain.entity.ReportFormat
+import com.quiquecx.simaapp.domain.entity.WorkerSessionLog
 import com.quiquecx.simaapp.utils.CsvGenerator
+import com.quiquecx.simaapp.utils.HtmlGenerator
+import java.io.File
 import javax.inject.Inject
-
 
 class GenerateReportUseCase @Inject constructor(
     private val htmlGenerator: HtmlGenerator,
@@ -16,18 +17,24 @@ class GenerateReportUseCase @Inject constructor(
 
     suspend operator fun invoke(
         activities: List<ActivityEntity>,
-        config: ReportConfig
+        config: ReportConfig,
+        activitySessions: Map<String, List<WorkerSessionLog>> = emptyMap()
     ): File {
-
-        val enrichedActivities = enrichActivitiesUseCase(activities)
-
+        val startDate = config.startDate?.toDate()
+        val endDate = config.endDate?.toDate()
+        val enrichedActivities = enrichActivitiesUseCase(activities, startDate, endDate)
 
         return when (config.format) {
-            com.quiquecx.simaapp.domain.entity.ReportFormat.PDF ->
-                htmlGenerator.generate(enrichedActivities, config)
-            com.quiquecx.simaapp.domain.entity.ReportFormat.EXCEL,
-            com.quiquecx.simaapp.domain.entity.ReportFormat.CSV ->
+            ReportFormat.PDF -> {
+                htmlGenerator.generate(
+                    activities = enrichedActivities,
+                    config = config,
+                    activitySessions = activitySessions
+                )
+            }
+            ReportFormat.EXCEL, ReportFormat.CSV -> {
                 csvGenerator.generate(enrichedActivities, config)
+            }
         }
     }
 }

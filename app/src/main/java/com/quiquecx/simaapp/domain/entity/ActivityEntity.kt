@@ -97,5 +97,18 @@ data class ProductivityEntity(
     val turno: String = "",
     val cantidadOk: Int = 0,
     val defectos: List<DefectEntry> = emptyList(),
-    val registradoPor: String = ""
+    val registradoPor: String = "",
+    val workerName: String = ""
+)
+
+data class WorkerSessionLog(
+    val id: String = "",
+    val workerName: String = "",
+    val timestamp: Timestamp = Timestamp.now(),
+    val durationHours: Double = 0.0,
+    val piecesChecked: Int = 0,
+    val piecesOk: Int = 0,
+    val piecesNoOk: Int = 0,
+    val defectos: List<DefectEntry> = emptyList(),
+    val dia: String = ""
 )
